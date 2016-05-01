@@ -1,4 +1,5 @@
 #define _CRT_SECURE_NO_WARNINGS
+#define CL_USE_DEPRECATED_OPENCL_1_1_APIS
 #define CL_USE_DEPRECATED_OPENCL_2_0_APIS
 #define PROGRAM_FILE "sph.cl"
 
@@ -109,14 +110,14 @@ bool checkDensityErrors(cl_float *densityError)
 {
 	bool result = false;
 	cl_float max = 0;
-	for (size_t i = 0; i < 200; i++)
+	for (size_t i = 0; i < 1000; i++)
 	{
 		if (densityError[i] > max)
 			max = densityError[i];
-		if (densityError[i] > 50)
+		if (densityError[i] > 10)
 			result = true;
 	}
-	printf("max: %f\n", max);
+	//printf("max: %f\n", max);
 	return result;
 }
 
@@ -140,16 +141,16 @@ int main() {
 	cl_kernel updateOldForces;
 
 	/* Data */
-	size_t num_particles = 200;
+	size_t num_particles = 1000;
 	size_t work_units = num_particles;
-	const size_t outputStep = 10; 
+	const size_t outputStep = 1;
 
 	struct fluidParams simulationParams;
 	
 	cl_float3 pos[num_particles];
 	cl_float3 vel[num_particles];
 	cl_float densityError[num_particles];
-	cl_float3 zerosFloat3[200] = {0};
+	cl_float3 zerosFloat3[1000] = {0};
 
 	/* Buffers */
 	cl_mem posBuffer;
@@ -164,27 +165,35 @@ int main() {
 
 	srandom(time(NULL));
 
-	/* Setup input data */
-	
-	simulationParams = (struct fluidParams)
+	/* Setup input data */	
+	/* Use SI units */
 	{
-		.particleMass          = 1,
-		.restDensity           = 1000,
-		.interactionRadius     = 0.225,
-		.viscosity             = 0.0,//0.1,
-		.gravity               = (cl_float3) {{0.0f, 0.0f, -9.81f}},
-		.timeStep              = 0.01f,
-		.pressureScalingFactor = 0.148743f
-	};
+		const cl_float  particleMass = 1.0f;
+		const cl_float  particleRadius = 0.1f;
+		const cl_float  restDensity = 1000.0f;
+		const cl_float  interactionRadius = 0.225f;
+		const cl_float  timeStep = 0.001f;
+		const cl_float  viscosity = 0.0001f;
+		const cl_float3 gravity = {{0.0f, 0.0f, 0.0f}};
+		simulationParams = newFluidParams (particleMass, 
+						   particleRadius, 
+						   restDensity,
+						   interactionRadius,
+						   timeStep,
+						   viscosity,
+						   gravity);
+	}
 
-	for (size_t i = 0; i < num_particles; i++)
+	for (int x = -5; x < 5; x++)
 	{
-		float r = randRange (0, 0.5);
-		float theta = randRange (0, 2*M_PI);
-		float phi = randRange (0, M_PI);
-	
-		pos[i] = (cl_float3) {{r * cos(theta) * sin(phi), r * sin(theta) * sin(phi), r*cos(phi)}};
-		vel[i] = (cl_float3) {{0.0f, 0.0f, 0.0f}};
+		for (int y = -5; y < 5; y++)
+		{
+			for (int z = -5; z < 5; z++)
+			{
+				pos[(x+5) * 100 + (y+5) * 10 + (z+5)] = (cl_float3) {{x*0.1f, y*0.1f, z*0.1f}};
+				vel[(x+5) * 100 + (y+5) * 10 + (z+5)] = (cl_float3) {{-x*0.01f, -y*0.01f, -z*0.01f}};
+			}
+		}
 	}
 
 	/* Create a device and context */
@@ -425,31 +434,44 @@ int main() {
 		perror("Couldn't enqueue initial updateDensity kernel");
 		exit(1);   
 	};   
-/*
-			err = clEnqueueReadBuffer(
-					queue,
-					densityBuffer,
-					CL_TRUE,
-					0,
-					sizeof(cl_float) * num_particles,
-					densityError,
-					0,
-					NULL,
-					NULL);
-	
-			if(err < 0) {
-				perror("Couldn't enqueue read");
-				exit(1);   
-			};
-	
-			for (size_t j = 0; j < num_particles; j++)
-			{
-				printf("%.3f\t", densityError[j]);
-			}
-			printf("\n");
 
-			return 0;
+/*
+
+	// Synchronise 
+	err = clEnqueueBarrier(queue);
+	if(err < 0) {
+	//	printf("Iteration %u\n", i);
+		perror("Couldn't enqueue pre-loop barrier");
+		exit(1);   
+	};   
+
+	clFinish(queue);
+	
+	err = clEnqueueReadBuffer(
+			queue,
+			densityBuffer,
+			CL_TRUE,
+			0,
+			sizeof(cl_float) * num_particles,
+			densityError,
+			0,
+			NULL,
+			NULL);
+	if(err < 0) {
+		perror("Couldn't enqueue read");
+		exit(1);   
+	};
+	for (size_t j = 0; j < num_particles; j++)
+	{
+		printf("%.3f\t", densityError[j]);
+	}
+	printf("\n");
+
+	return 0;
 */
+
+
+
 	/* Execute kernels, read data and print */
 	for (unsigned int i = 0; i < 500*outputStep; i++)
 	{	
@@ -496,7 +518,7 @@ int main() {
 		};   
 
 		/* Prediction-correction pressure loop */
-		for(size_t n = 0; n < 7; n++)
+		for(size_t n = 0; n < 3 || checkDensityErrors(densityError); n++)
 		{
 			/* Predict positions & velocities */
 			err = clEnqueueNDRangeKernel(
@@ -566,7 +588,7 @@ int main() {
 			};   
 
 			/* Read density error buffer */
-		/*	err = clEnqueueReadBuffer(
+			err = clEnqueueReadBuffer(
 					queue,
 					densityErrorBuffer,
 					CL_TRUE,
@@ -581,8 +603,7 @@ int main() {
 				perror("Couldn't enqueue read");
 				exit(1);   
 			};
-		*/
-		} //while (checkDensityErrors(densityError));
+		}
 		
 		/* Update positions and velocities */
 		err = clEnqueueNDRangeKernel(
@@ -600,6 +621,14 @@ int main() {
 			perror("Couldn't enqueue verletGuessStep kernel");
 			exit(1);   
 		};   
+	
+		/* Synchronise */
+		err = clEnqueueBarrier(queue);
+		if(err < 0) {
+			printf("Iteration %u\n", i);
+			perror("Couldn't enqueue post-loop barrier");
+			exit(1);   
+		};   
 		
 		/* Update old forces */
 		err = clEnqueueNDRangeKernel(
@@ -615,6 +644,14 @@ int main() {
 		if(err < 0) {
 			printf("Iteration %u\n", i);
 			perror("Couldn't enqueue updateOldForces kernel");
+			exit(1);   
+		};   
+	
+		/* Synchronise */
+		err = clEnqueueBarrier(queue);
+		if(err < 0) {
+			printf("Iteration %u\n", i);
+			perror("Couldn't enqueue post-loop barrier");
 			exit(1);   
 		};   
 		

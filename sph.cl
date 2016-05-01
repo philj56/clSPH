@@ -3,14 +3,14 @@
 
 #define MAX_NEIGHBOURS 200
 
-float3 weightMonaghanSpline(float3 p12, float interactionRadius);
+float weightMonaghanSpline(float3 p12, float interactionRadius);
 
-float3 weightMonaghanSplinePrime(float3 p12, float interactionRadius);
+float weightMonaghanSplinePrime(float3 p12, float interactionRadius);
 
-float3 viscosityMonaghan(float3 p12,
-						 float3 v12,
-						 float  rhoAvg,
-						 float  interactionRadius);
+float viscosityMonaghan(float3 p12,
+						float3 v12,
+						float  rhoAvg,
+						float  interactionRadius);
 
 /* Simple neighbour search. TODO: optimise so neighbours aren't repeatedly found */
 size_t findNeighbours (__global float3 *pos,
@@ -26,7 +26,7 @@ size_t findNeighbours (__global float3 *pos,
 	for (size_t i = 0; i < gSize && nNeighbours < maxNeighbours; i++)
 	{
 		dist = distance(pos[gID], pos[i]);
-		if (isless(dist, 2.0f * interactionRadius) && gID != i)
+		if (isless(dist, 2.0f * interactionRadius)/* && gID != i*/)
 		{
 			neighbours[nNeighbours++] = i;
 		}
@@ -43,12 +43,15 @@ void density(__global float3 *pos,
 			 struct fluidParams params)
 {
 	float sum;
-	sum = 0;
+	sum = 0.0f;
 
 	for (size_t i = 0; i < nNeighbours; i++)
 	{
-		sum += params.particleMass * length(weightMonaghanSpline(pos[gID] - pos[neighbours[i]], params.interactionRadius));
+		sum += weightMonaghanSpline(pos[gID] - pos[neighbours[i]], params.interactionRadius);
 	}
+	sum += 1.0f;
+
+	sum *= params.monaghanSplineNormalisation * params.particleMass;
 
 	densities[gID] = sum;
 }
@@ -86,20 +89,23 @@ __kernel void nonPressureForces(__global float3 *pos,
 	force = 0.0f;
 
 	nNeighbours = findNeighbours (pos, gID, gSize, neighbours, MAX_NEIGHBOURS, params.interactionRadius);
-/*
+
 	// Viscosity force
 	for (size_t i = 0; i < nNeighbours; i++)
 	{
-//		force += (vel[neighbours[i]] - vel[gID]) * (distance(pos[gID], pos[neighbours[i]]) / densities[neighbours[i]]);
-			force += viscosityMonaghan(pos[gID] - pos[neighbours[i]], 
-									   vel[gID] - vel[neighbours[i]], 
-									   (densities[gID] + densities[neighbours[i]]) * 0.5f, 
-									   params.interactionRadius);
+		size_t j = neighbours[i];
+//		force += (vel[neighbours[i]] - vel[gID]) * (weightMonaghanSpline(pos[gID], pos[neighbours[i]]) * densities[neighbours[i]]);
+			force += viscosityMonaghan(pos[gID] - pos[j], 
+									   vel[gID] - vel[j], 
+									   (densities[gID] + densities[j]) * 0.5f, 
+									   params.interactionRadius)
+				   * weightMonaghanSplinePrime(pos[gID] - pos[j], params.interactionRadius)
+				   * normalize(pos[gID] - pos[j]);
 	}	
-*/
-	force *= params.viscosity;
 
-	force += params.gravity;
+	force *= -params.monaghanSplinePrimeNormalisation * params.viscosity * params.particleMass;
+
+	force += params.gravity * params.particleMass;
 
 	nonPressureForces[gID] = force;
 }
@@ -119,46 +125,65 @@ __kernel void verletStep(__global float3 *posIn,
 						 struct fluidParams params)
 {
 	size_t gID;
+	float3 force;
 	gID = get_global_id(0);
 
-	velOut[gID] = velIn[gID] + params.timeStep * 0.5f * (oldForces[gID] + nonPressureForces[gID] + pressure[gID].xyz) / params.particleMass;
-	posOut[gID] = posIn[gID] + params.timeStep * fma(params.timeStep, oldForces[gID] / params.particleMass, velOut[gID]);
+	force = nonPressureForces[gID] + pressure[gID].xyz;
+//TODO: sort out actual verlet integration
+	velOut[gID] = velIn[gID] + params.timeStep * force / params.particleMass;
+	posOut[gID] = posIn[gID] + velOut[gID] * params.timeStep;
 
-	/* Elastic Boundary */
-	if (isgreater(posOut[gID].x, 2.0f))
-	{
-		posOut[gID].x = 4.0f - posOut[gID].x;
-		velOut[gID].x *= -1;
-	}
-	else if (isless(posOut[gID].x, -2.0f))
-	{
-		posOut[gID].x = -4.0f - posOut[gID].x;
-		velOut[gID].x *= -1;
-	}
+//	posOut[gID] = posIn[gID] + params.timeStep * fma(params.timeStep, oldForces[gID] / params.particleMass, velIn[gID]);
+//	velOut[gID] = velIn[gID] + params.timeStep * 0.5f * (oldForces[gID] + nonPressureForces[gID] + pressure[gID].xyz) / params.particleMass;
 
-	if (isgreater(posOut[gID].y, 2.0f))
+	/* Semi-Elastic Boundary */
+/*	if (isgreater(posOut[gID].x, 0.6f))
 	{
-		posOut[gID].y = 4.0f - posOut[gID].y;
-		velOut[gID].y *= -1;
+		posOut[gID].x = 1.2f - posOut[gID].x;
+		velOut[gID].x *= -0.5f;
+		velOut[gID].y *= 0.99f;
+		velOut[gID].z *= 0.99f;
 	}
-	else if (isless(posOut[gID].y, -2.0f))
+	else if (isless(posOut[gID].x, -0.6f))
 	{
-		posOut[gID].y = -4.0f - posOut[gID].y;
-		velOut[gID].y *= -1;
+		posOut[gID].x = -1.2f - posOut[gID].x;
+		velOut[gID].x *= -0.5f;
+		velOut[gID].y *= 0.99f;
+		velOut[gID].z *= 0.99f;
 	}
 
-	if (isgreater(posOut[gID].z, 2.0f))
+	if (isgreater(posOut[gID].y, 0.6f))
 	{
-		posOut[gID].z = 4.0f - posOut[gID].z;
-		velOut[gID].z *= -1;
+		posOut[gID].y = 1.2f - posOut[gID].y;
+		velOut[gID].x *= 0.99f;
+		velOut[gID].y *= -0.5f;
+		velOut[gID].z *= 0.99f;
 	}
-	else if (isless(posOut[gID].z, -2.0f))
+	else if (isless(posOut[gID].y, -0.6f))
 	{
-		posOut[gID].z = -4.0f - posOut[gID].z;
-		velOut[gID].z *= -1;
+		posOut[gID].y = -1.2f - posOut[gID].y;
+		velOut[gID].x *= 0.99f;
+		velOut[gID].y *= -0.5f;
+		velOut[gID].z *= 0.99f;
 	}
 
-//	posOut[gID] = clamp(posOut[gID], -2.0f, 2.0f);
+	if (isgreater(posOut[gID].z, 0.6f))
+	{
+		posOut[gID].z = 1.2f - posOut[gID].z;
+		velOut[gID].x *= 0.99f;
+		velOut[gID].y *= 0.99f;
+		velOut[gID].z *= -0.5f;
+	}
+	else if (isless(posOut[gID].z, -0.6f))
+	{
+		posOut[gID].z = -1.2f - posOut[gID].z;
+		velOut[gID].x *= 0.99f;
+		velOut[gID].y *= 0.99f;
+		velOut[gID].z *= -0.5f;
+	}
+
+	posOut[gID] = clamp(posOut[gID], -10.0f, 10.0f);
+*/
 }
 
 __kernel void predictDensityPressure(__global float3 *pos,
@@ -179,10 +204,10 @@ __kernel void predictDensityPressure(__global float3 *pos,
 
 	/* Predict density error */
 	density(pos, densities, gID, neighbours, nNeighbours, params);
-	densityErrors[gID] = densities[gID] - params.restDensity;
+	densityErrors[gID] = max(0.0f, densities[gID] - params.restDensity);
 
 	/* Update pressure */
-	pressure[gID].w -= densityErrors[gID] * params.pressureScalingFactor;
+	pressure[gID].w += densityErrors[gID] * params.pressureScalingFactor;
 }
 
 __kernel void pressureForces(__global float3 *pos,
@@ -209,12 +234,16 @@ __kernel void pressureForces(__global float3 *pos,
 	for (size_t i = 0; i < nNeighbours; i++)
 	{
 		j = neighbours[i];
-		pressureForce -= (pRhoSqr + pressure[j].w * pown(densities[j], -2)) * weightMonaghanSplinePrime(pos[gID] - pos[j], params.interactionRadius);
+		if (j == gID)
+			continue;
+		pressureForce += (pRhoSqr + pressure[j].w * pown(densities[j], -2)) * weightMonaghanSplinePrime(pos[gID] - pos[j], params.interactionRadius) * fast_normalize(pos[gID] - pos[j]);
 	}
 
-	pressureForce *= -pown(params.particleMass, 2);
+	pressureForce *= -params.monaghanSplinePrimeNormalisation * pown(params.particleMass, 2);
 
 	pressure[gID].xyz = pressureForce;
+
+//	printf("pressure.w: %f\n", pressure[gID].w);
 }
 
 __kernel void updateOldForces(__global float3 *nonPressureForces,
@@ -227,65 +256,58 @@ __kernel void updateOldForces(__global float3 *nonPressureForces,
 	oldForces[gID] = nonPressureForces[gID] + pressure[gID].xyz;
 }
 
-float3 weightMonaghanSpline(float3 p12, float interactionRadius)
-{
-	float3 q;
-	float qD;
-	float3 w;
-
-	q = p12 / interactionRadius;
-	qD = length(q);
-	w = 0;
-
-	if (isgreaterequal(qD, 0.0001f))
-	{
-		if (islessequal(qD, 1.0f))
-		{
-			w += 1.0f + q * q * fma(q, 0.75f, -1.5f);
-		}
-		else if (islessequal(qD, 2.0f))
-		{
-			w += 0.25f * pow(2.0f - q, 3.0f);
-		}
-	}
-	
-	w *= M_1_PI_F * pow(interactionRadius, -3.0f);
-
-	return w;
-}
-
-float3 weightMonaghanSplinePrime(float3 p12, float interactionRadius)
+float weightMonaghanSpline(float3 p12, float interactionRadius)
 {
 	float q;
 	float w;
 
-	q = length(p12) / interactionRadius;
+	q = fast_length(p12) / interactionRadius;
 	w = 0.0f;
 
-	if (isgreaterequal(q, 0.0001f))
+	if (islessequal(q, 1.0f))
 	{
-		if (islessequal(q, 1.0f))
-		{
-			w += 0.75f * q * fma(q, 3.0f, -4.0f);
-		}
-		else if (islessequal(q, 2.0f))
-		{
-			w += -0.75f * pown(2.0f - q, 2);
-		}
+		w += 1.0f + q * q * mad(q, 0.75f, -1.5f);
 	}
-	
-	w *= M_1_PI_F * pow(interactionRadius, -3.0f);
+	else if (islessequal(q, 2.0f))
+	{
+		w += 0.25f * pow(2.0f - q, 3.0f);
+	}
 
-	return w * normalize(p12);
+	return w;
+}
+
+float weightMonaghanSplinePrime(float3 p12, float interactionRadius)
+{
+	float r;
+	float w;
+
+	r = fast_length(p12);
+	w = 0.0f;
+
+	if (islessequal(r, 0.001f*interactionRadius))
+		return w;
+
+	if (islessequal(r, interactionRadius))
+	{
+		w += r * mad(r, 3.0f, -4.0f * interactionRadius);
+	}
+	else if (islessequal(r, 2.0f * interactionRadius))
+	{
+		w += -pown(mad(-2.0f, interactionRadius, r), 2);
+	}
+		
+	w *= 0.75f * pown(interactionRadius, -2);
+
+	return w;
 }
 
 // v12:     v1 - v2
 // p12:     p1 - p2
 // rhoAvg:  average of (rho1, rho2)
-float3 viscosityMonaghan(float3 p12,
-						 float3 v12,
-						 float  rhoAvg,
-						 float  interactionRadius)
+float viscosityMonaghan(float3 p12,
+						float3 v12,
+						float  rhoAvg,
+						float  interactionRadius)
 {
 	float vd = dot(v12, p12);
 	
@@ -302,12 +324,12 @@ float3 viscosityMonaghan(float3 p12,
 
 	// Take c to be 1400 m/s for now
 	float c;
-	c = 1;
+	c = 1400;
 
 
 	float mu12;
 	mu12 = (interactionRadius * vd) / (dot(p12, p12) + etaSqr);
 
-	return normalize(p12) * mu12 * fma(-alpha, c, beta * mu12) / rhoAvg;	
+	return mu12 * fma(-alpha, c, beta * mu12) / rhoAvg;	
 }
 
