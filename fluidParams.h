@@ -64,7 +64,7 @@ struct fluidParams {
 		params->monaghanSplineNormalisation = 1.0f / (M_PI * pow(params->interactionRadius, 3));
 		params->monaghanSplinePrimeNormalisation = 10.0f / (7.0f * pow(params->interactionRadius, 3));
 
-		const OPENCL_FLOAT beta = 2.0f * pow (params->timeStep * params->particleMass / params->restDensity, 2);
+		const double beta = 2.0f * pow (params->timeStep * params->particleMass / params->restDensity, 2);
 
 		/* Sum of (kernel gradients) */
 		OPENCL_FLOAT delKernelSum[3] = {0.0f, 0.0f, 0.0f};
@@ -84,7 +84,7 @@ struct fluidParams {
 					OPENCL_FLOAT r2 = x * x + y * y + z * z;
 					OPENCL_FLOAT r = sqrt(r2);
 
-					if(r < params->interactionRadius && r != 0.0f)
+					if(r < params->interactionRadius * 2.0f && r != 0.0f)
 					{
 						OPENCL_FLOAT factor = params->monaghanSplinePrimeNormalisation * weightMonaghanSplinePrime(r, params->interactionRadius);
 						factor /= r;
@@ -113,7 +113,7 @@ struct fluidParams {
 		{
 			delKernelSumDotDelKernelSum += pow (delKernelSum[i], 2);
 		}
-//		printf("Mass: %f\nIntRad: %f\nNormalisation: %f\nBeta: %f\nDelDotSum: %f\nDotDelSum: %f\n", params->particleMass, params->interactionRadius, params->monaghanSplineNormalisation, beta, delKernelDotDelKernelSum, delKernelSumDotDelKernelSum);
+		printf("Mass: %f\nIntRad: %f\nNormalisation: %f\nBeta: %e\nDelDotSum: %f\nDotDelSum: %f\n", params->particleMass, params->interactionRadius, params->monaghanSplineNormalisation, beta, delKernelDotDelKernelSum, delKernelSumDotDelKernelSum);
 
 		params->pressureScalingFactor = -1.0f / (beta * (-delKernelSumDotDelKernelSum - delKernelDotDelKernelSum));
 		printf("scale: %f\n", params->pressureScalingFactor);

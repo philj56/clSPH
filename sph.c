@@ -168,11 +168,11 @@ int main() {
 	/* Setup input data */	
 	/* Use SI units */
 	{
-		const cl_float  particleMass = 1.0f;
-		const cl_float  particleRadius = 0.1f;
+		const cl_float  particleMass = 0.05f;
+		const cl_float  particleRadius = 0.0368f;
 		const cl_float  restDensity = 1000.0f;
-		const cl_float  interactionRadius = 0.225f;
-		const cl_float  timeStep = 0.001f;
+		const cl_float  interactionRadius = 0.0736842f;
+		const cl_float  timeStep = 0.002f;
 		const cl_float  viscosity = 0.0001f;
 		const cl_float3 gravity = {{0.0f, 0.0f, 0.0f}};
 		simulationParams = newFluidParams (particleMass, 
@@ -470,7 +470,7 @@ int main() {
 	return 0;
 */
 
-
+	printf("GGG");
 
 	/* Execute kernels, read data and print */
 	for (unsigned int i = 0; i < 500*outputStep; i++)
