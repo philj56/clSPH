@@ -56,6 +56,26 @@ struct fluidParams {
 		
 		return w;
 	}
+
+	OPENCL_FLOAT weightMonaghanSpline(OPENCL_FLOAT r, OPENCL_FLOAT interactionRadius)
+	{
+		OPENCL_FLOAT q;
+		OPENCL_FLOAT w;
+	
+		q = r / interactionRadius;
+		w = 0.0f;
+	
+		if (islessequal(q, 1.0f))
+		{
+			w += 1.0f + q * q * (q * 0.75f - 1.5f);
+		}
+		else if (islessequal(q, 2.0f))
+		{
+			w += 0.25f * pow(2.0f - q, 3.0f);
+		}
+	
+		return w;
+	}
 	
 	/* Deduce attributes from timeStep, restDensity, particleRadius & viscosity */
 	/* Use spline weight from Monaghan 1992 */
@@ -64,6 +84,7 @@ struct fluidParams {
 		params->monaghanSplineNormalisation = 1.0f / (M_PI * pow(params->interactionRadius, 3));
 		params->monaghanSplinePrimeNormalisation = 10.0f / (7.0f * pow(params->interactionRadius, 3));
 
+		double dense = 0;
 		const double beta = 2.0f * pow (params->timeStep * params->particleMass / params->restDensity, 2);
 
 		/* Sum of (kernel gradients) */
@@ -75,19 +96,22 @@ struct fluidParams {
 		/* Sum of (kernel gradients magnitude squared) */
 		OPENCL_FLOAT delKernelDotDelKernelSum = 0.0f;
 
-		for (OPENCL_FLOAT x = -2.0f * params->interactionRadius; x <= 2.0f * params->interactionRadius; x += 2.0f * params->particleRadius)
+		for (OPENCL_FLOAT x = -2.0f * params->interactionRadius; x <= 2.0f * params->interactionRadius; x += params->particleRadius)
 		{
-			for (OPENCL_FLOAT y = -2.0f * params->interactionRadius; y <= 2.0f * params->interactionRadius; y += 2.0f * params->particleRadius)
+			for (OPENCL_FLOAT y = -2.0f * params->interactionRadius; y <= 2.0f * params->interactionRadius; y += params->particleRadius)
 			{
-				for (OPENCL_FLOAT z = -2.0f * params->interactionRadius; z <= 2.0f * params->interactionRadius; z += 2.0f * params->particleRadius)
+				for (OPENCL_FLOAT z = -2.0f * params->interactionRadius; z <= 2.0f * params->interactionRadius; z += params->particleRadius)
 				{
 					OPENCL_FLOAT r2 = x * x + y * y + z * z;
 					OPENCL_FLOAT r = sqrt(r2);
+						
+					dense += weightMonaghanSpline(r, params->interactionRadius);
 
 					if(r < params->interactionRadius * 2.0f && r != 0.0f)
 					{
 						OPENCL_FLOAT factor = params->monaghanSplinePrimeNormalisation * weightMonaghanSplinePrime(r, params->interactionRadius);
 						factor /= r;
+
 
 						OPENCL_FLOAT delKernel[3] = {
 							factor * x,
@@ -113,11 +137,13 @@ struct fluidParams {
 		{
 			delKernelSumDotDelKernelSum += pow (delKernelSum[i], 2);
 		}
-		printf("Mass: %f\nIntRad: %f\nNormalisation: %f\nBeta: %e\nDelDotSum: %f\nDotDelSum: %f\n", params->particleMass, params->interactionRadius, params->monaghanSplineNormalisation, beta, delKernelDotDelKernelSum, delKernelSumDotDelKernelSum);
+		//printf("Mass: %f\nIntRad: %f\nNormalisation: %f\nBeta: %e\nDelDotSum: %f\nDotDelSum: %f\n", params->particleMass, params->interactionRadius, params->monaghanSplineNormalisation, beta, delKernelDotDelKernelSum, delKernelSumDotDelKernelSum);
 
 		params->pressureScalingFactor = -1.0f / (beta * (-delKernelSumDotDelKernelSum - delKernelDotDelKernelSum));
-		printf("scale: %f\n", params->pressureScalingFactor);
-//		params->pressureScalingFactor /= 50.0f;
+	//	printf("Pressure scale: %f\n", params->pressureScalingFactor);
+	//	printf("Density: %f\n", dense * params->particleMass * params->monaghanSplineNormalisation);
+	//	params->pressureScalingFactor /= 10.0f;
+	//	exit(0);
 	}
 
 	/* Create fully initialised fluidParams from key inputs */
