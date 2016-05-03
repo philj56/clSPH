@@ -25,9 +25,9 @@ struct fluidParams {
 	OPENCL_FLOAT monaghanSplineNormalisation;
 	OPENCL_FLOAT monaghanSplinePrimeNormalisation;
 
-	OPENCL_FLOAT surface_tension_coefficient;
-	OPENCL_FLOAT surface_tension_term;
-	OPENCL_FLOAT surface_tension_normalization;
+	OPENCL_FLOAT surfaceTension;
+	OPENCL_FLOAT surfaceTensionTerm;
+	OPENCL_FLOAT surfaceTensionNormalisation;
 
 	OPENCL_FLOAT viscosity;
 	OPENCL_FLOAT3 gravity;	
@@ -83,6 +83,8 @@ struct fluidParams {
 	{
 		params->monaghanSplineNormalisation = 1.0f / (M_PI * pow(params->interactionRadius, 3));
 		params->monaghanSplinePrimeNormalisation = 10.0f / (7.0f * pow(params->interactionRadius, 3));
+		params->surfaceTensionNormalisation = 32.0f / (M_PI * pow(params->interactionRadius, 9));
+		params->surfaceTensionTerm = -pow(params->interactionRadius, 6) / 64.0f;
 
 		double dense = 0;
 		const double beta = 2.0f * pow (params->timeStep * params->particleMass / params->restDensity, 2);
@@ -153,6 +155,7 @@ struct fluidParams {
 					   OPENCL_FLOAT interactionRadius,
 					   OPENCL_FLOAT timeStep, 
 					   OPENCL_FLOAT viscosity, 
+					   OPENCL_FLOAT surfaceTension, 
 					   OPENCL_FLOAT3 gravity)
 	{
 		struct fluidParams params =
@@ -163,6 +166,7 @@ struct fluidParams {
 			.interactionRadius = interactionRadius,
 			.timeStep          = timeStep,
 			.viscosity         = viscosity,
+			.surfaceTension    = surfaceTension,
 			.gravity           = gravity
 		};
 	

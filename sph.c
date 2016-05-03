@@ -114,7 +114,7 @@ bool checkDensityErrors(cl_float *densityError, size_t num_particles)
 	{
 		if (densityError[i] > max)
 			max = densityError[i];
-		if (densityError[i] > 10)
+		if (densityError[i] > 10.0)
 			result = true;
 	}
 //	printf("max: %f\n", max);
@@ -134,17 +134,19 @@ int main() {
 	cl_kernel nonPressureForces;
 	cl_kernel initPressure;
 	cl_kernel updateDensity;
+	cl_kernel updateNormals;
 	cl_kernel verletStep;
 	cl_kernel verletGuessStep;
 	cl_kernel predictDensityPressure;
 	cl_kernel pressureForces;
 	cl_kernel updateOldForces;
+	cl_kernel findNeighbours;
 
 	/* Data */
 	const size_t resolution = 10;
 	const size_t num_particles = resolution*resolution*resolution;
 	const size_t work_units = num_particles;
-	const size_t outputStep = 4;
+	const size_t outputStep = 1;
 
 	struct fluidParams simulationParams;
 	
@@ -160,9 +162,11 @@ int main() {
 	cl_mem velGuessBuffer;
 	cl_mem densityBuffer;
 	cl_mem densityErrorBuffer;
+	cl_mem normalBuffer;
 	cl_mem nonPressureForcesBuffer;
 	cl_mem pressureBuffer;
 	cl_mem oldForcesBuffer;
+	cl_mem neighbourBuffer;
 
 	srandom(time(NULL));
 
@@ -172,16 +176,18 @@ int main() {
 		const cl_float  restDensity = 1000.0f;
 		const cl_float  particleMass = restDensity / num_particles;
 		const cl_float  particleRadius = 1.0f/resolution;
-		const cl_float  interactionRadius = 1.0f * particleRadius;
-		const cl_float  timeStep = 0.001f;
+		const cl_float  interactionRadius = 2.0f * particleRadius;
+		const cl_float  timeStep = 0.004f;
 		const cl_float  viscosity = 0.001f;
-		const cl_float3 gravity = {{0.0f, 0.0f, -9.81f}};
+		const cl_float  surfaceTension = 1.0f;
+		const cl_float3 gravity = {{0.0f, 0.0f, 0.0f}};
 		simulationParams = newFluidParams (particleMass, 
 						   particleRadius, 
 						   restDensity,
 						   interactionRadius,
 						   timeStep,
 						   viscosity,
+						   surfaceTension,
 						   gravity);
 	}
 
@@ -191,10 +197,10 @@ int main() {
 		{
 			for (size_t z = 0; z < resolution; z++)
 			{
-				pos[(x * resolution + y) * resolution + z] = (cl_float3) {{((float)x-resolution/2)*simulationParams.particleRadius,
-											   ((float)y-resolution/2)*simulationParams.particleRadius,
-											   ((float)z-resolution/2)*simulationParams.particleRadius}};
-				vel[(x * resolution + y) * resolution + z] = (cl_float3) {{-x*0.0f, -y*0.0f, -z*0.0f}};
+				pos[(x * resolution + y) * resolution + z] = (cl_float3) {{((float)x-resolution/2)*simulationParams.particleRadius + randRange(-0.01f, 0.01f),
+											   ((float)y-resolution/2)*simulationParams.particleRadius + randRange(-0.01f, 0.01f),
+											   ((float)z-resolution/2)*simulationParams.particleRadius + randRange(-0.01f, 0.01f)}};
+				vel[(x * resolution + y) * resolution + z] = (cl_float3) {{x*0.01f, y*0.01f, z*0.01f}};
 			}
 		}
 	}
@@ -251,6 +257,14 @@ int main() {
 		exit(1);   
 	};
 	
+	normalBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE, 
+				   	sizeof(cl_float3) * num_particles, NULL, &err);
+	if(err < 0) {
+		perror("Couldn't create normals buffer");
+		exit(1);   
+	};
+	
+	
 	nonPressureForcesBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE, 
 				    	sizeof(cl_float3) * num_particles, NULL, &err);
 	if(err < 0) {
@@ -269,6 +283,13 @@ int main() {
 				    	sizeof(cl_float3) * num_particles, zerosFloat3, &err);
 	if(err < 0) {
 		perror("Couldn't create old forces buffer");
+		exit(1);   
+	};
+	
+	neighbourBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE, 
+				    	sizeof(size_t) * num_particles * 400, NULL, &err);
+	if(err < 0) {
+		perror("Couldn't create neighbour buffer");
 		exit(1);   
 	};
 
@@ -290,6 +311,12 @@ int main() {
 	updateDensity = clCreateKernel(program, "updateDensity", &err);
 	if(err < 0) {
 		perror("Couldn't create updateDensity kernel");
+		exit(1);   
+	};
+
+	updateNormals = clCreateKernel(program, "updateNormals", &err);
+	if(err < 0) {
+		perror("Couldn't create updateNormals kernel");
 		exit(1);   
 	};
 	
@@ -323,12 +350,20 @@ int main() {
 		exit(1);   
 	};
 
+	findNeighbours = clCreateKernel(program, "findNeighbours", &err);
+	if(err < 0) {
+		perror("Couldn't create findNeighbours kernel");
+		exit(1);   
+	};
+
 	/* Set kernel args */
 	err  = clSetKernelArg (nonPressureForces, 0, sizeof(cl_mem), &posBuffer);
 	err |= clSetKernelArg (nonPressureForces, 1, sizeof(cl_mem), &velBuffer);
 	err |= clSetKernelArg (nonPressureForces, 2, sizeof(cl_mem), &nonPressureForcesBuffer);
 	err |= clSetKernelArg (nonPressureForces, 3, sizeof(cl_mem), &densityBuffer);
-	err |= clSetKernelArg (nonPressureForces, 4, sizeof(struct fluidParams), &simulationParams);
+	err |= clSetKernelArg (nonPressureForces, 4, sizeof(cl_mem), &normalBuffer);
+	err |= clSetKernelArg (nonPressureForces, 5, sizeof(cl_mem), &neighbourBuffer);
+	err |= clSetKernelArg (nonPressureForces, 6, sizeof(struct fluidParams), &simulationParams);
 
 	if(err < 0) {
 		perror("Couldn't set nonPressureForces kernel args");
@@ -346,10 +381,23 @@ int main() {
 
 	err  = clSetKernelArg (updateDensity, 0, sizeof(cl_mem), &posBuffer);
 	err |= clSetKernelArg (updateDensity, 1, sizeof(cl_mem), &densityBuffer);
-	err |= clSetKernelArg (updateDensity, 2, sizeof(struct fluidParams), &simulationParams);
+	err |= clSetKernelArg (updateDensity, 2, sizeof(cl_mem), &neighbourBuffer);
+	err |= clSetKernelArg (updateDensity, 3, sizeof(struct fluidParams), &simulationParams);
 	
 	if(err < 0) {
 		perror("Couldn't set updateDensity kernel args");
+		exit(1);   
+	};
+
+
+	err  = clSetKernelArg (updateNormals, 0, sizeof(cl_mem), &posBuffer);
+	err |= clSetKernelArg (updateNormals, 1, sizeof(cl_mem), &densityBuffer);
+	err |= clSetKernelArg (updateNormals, 2, sizeof(cl_mem), &normalBuffer);
+	err |= clSetKernelArg (updateNormals, 3, sizeof(cl_mem), &neighbourBuffer);
+	err |= clSetKernelArg (updateNormals, 4, sizeof(struct fluidParams), &simulationParams);
+	
+	if(err < 0) {
+		perror("Couldn't set updateNormals kernel args");
 		exit(1);   
 	};
 	
@@ -387,7 +435,8 @@ int main() {
 	err  = clSetKernelArg (predictDensityPressure, 0, sizeof(cl_mem), &posGuessBuffer);
 	err |= clSetKernelArg (predictDensityPressure, 1, sizeof(cl_mem), &densityErrorBuffer);
 	err |= clSetKernelArg (predictDensityPressure, 2, sizeof(cl_mem), &pressureBuffer);
-	err |= clSetKernelArg (predictDensityPressure, 3, sizeof(struct fluidParams), &simulationParams);
+	err |= clSetKernelArg (predictDensityPressure, 3, sizeof(cl_mem), &neighbourBuffer);
+	err |= clSetKernelArg (predictDensityPressure, 4, sizeof(struct fluidParams), &simulationParams);
 	
 	if(err < 0) {
 		perror("Couldn't set predictDensityPressure kernel args");
@@ -398,7 +447,8 @@ int main() {
 	err  = clSetKernelArg (pressureForces, 0, sizeof(cl_mem), &posBuffer);
 	err |= clSetKernelArg (pressureForces, 1, sizeof(cl_mem), &densityBuffer);
 	err |= clSetKernelArg (pressureForces, 2, sizeof(cl_mem), &pressureBuffer);
-	err |= clSetKernelArg (pressureForces, 3, sizeof(struct fluidParams), &simulationParams);
+	err |= clSetKernelArg (pressureForces, 3, sizeof(cl_mem), &neighbourBuffer);
+	err |= clSetKernelArg (pressureForces, 4, sizeof(struct fluidParams), &simulationParams);
 	
 	if(err < 0) {
 		perror("Couldn't set pressureForces kernel args");
@@ -413,6 +463,16 @@ int main() {
 		perror("Couldn't set updateOldForces kernel args");
 		exit(1);   
 	};
+
+	err  = clSetKernelArg (findNeighbours, 0, sizeof(cl_mem), &posBuffer);
+	err |= clSetKernelArg (findNeighbours, 1, sizeof(cl_mem), &neighbourBuffer);
+	err |= clSetKernelArg (findNeighbours, 2, sizeof(struct fluidParams), &simulationParams);
+	
+	if(err < 0) {
+		perror("Couldn't set updateOldForces kernel args");
+		exit(1);   
+	};
+
 
 	/* Create a command queue */
 	queue = clCreateCommandQueue(context, device, 0, &err);
@@ -475,6 +535,22 @@ int main() {
 	/* Execute kernels, read data and print */
 	for (unsigned int i = 0; i < 500*outputStep; i++)
 	{	
+		/* Update neighbours */
+		err = clEnqueueNDRangeKernel(
+				queue,
+				findNeighbours,
+				1,
+				NULL,
+				&work_units,
+				NULL,
+				0,
+				NULL,
+				NULL);
+		if(err < 0) {
+			perror("Couldn't enqueue findNeighbours kernel");
+			exit(1);   
+		};   
+		
 		/* Update density */
 		err = clEnqueueNDRangeKernel(
 				queue,
@@ -491,13 +567,21 @@ int main() {
 			exit(1);   
 		};   
 		
-		/* Synchronise */
-		err = clEnqueueBarrier(queue);
+		/* Update fluid normals */
+		err = clEnqueueNDRangeKernel(
+				queue,
+				updateNormals,
+				1,
+				NULL,
+				&work_units,
+				NULL,
+				0,
+				NULL,
+				NULL);
 		if(err < 0) {
-			printf("Iteration %u\n", i);
-			perror("Couldn't enqueue pre-loop barrier");
+			perror("Couldn't enqueue updateNormals kernel");
 			exit(1);   
-		};   
+		};   	
 
 		/* Calculate non-pressure forces */
 		err = clEnqueueNDRangeKernel(
@@ -533,16 +617,8 @@ int main() {
 			exit(1);   
 		};   
 	
-		/* Synchronise */
-		err = clEnqueueBarrier(queue);
-		if(err < 0) {
-			printf("Iteration %u\n", i);
-			perror("Couldn't enqueue pre-loop barrier");
-			exit(1);   
-		};   
-
 		/* Prediction-correction pressure loop */
-		for(size_t n = 0; n < 50; n++)
+		for(size_t n = 0; n < 14; n++)
 		{
 			/* Predict positions & velocities */
 			err = clEnqueueNDRangeKernel(
@@ -561,14 +637,6 @@ int main() {
 				exit(1);   
 			};   
 		
-			/* Synchronise */
-			err = clEnqueueBarrier(queue);
-			if(err < 0) {
-				printf("Iteration %u\n", i);
-				perror("Couldn't enqueue first loop barrier");
-				exit(1);   
-			};   
-
 			/* Predict density and its error and update pressure */
 			err = clEnqueueNDRangeKernel(
 					queue,
@@ -586,14 +654,6 @@ int main() {
 				exit(1);   
 			};   
 		
-			/* Synchronise */
-			err = clEnqueueBarrier(queue);
-			if(err < 0) {
-				printf("Iteration %u\n", i);
-				perror("Couldn't enqueue second loop barrier");
-				exit(1);   
-			};   
-
 			/* Predict density and its error and update pressure */
 			err = clEnqueueNDRangeKernel(
 					queue,
@@ -628,16 +688,15 @@ int main() {
 				exit(1);   
 			};
 
-			if (n>3)
+			if (n>2)
 			{
 				if (!checkDensityErrors(densityError, num_particles))
 				{
-					iters += (double)n - 7;
+					iters += (double)n;
 					break;
 				}
 			}
 		}
-		iters += 7;
 		
 		/* Update positions and velocities */
 		err = clEnqueueNDRangeKernel(
@@ -656,14 +715,6 @@ int main() {
 			exit(1);   
 		};   
 	
-		/* Synchronise */
-		err = clEnqueueBarrier(queue);
-		if(err < 0) {
-			printf("Iteration %u\n", i);
-			perror("Couldn't enqueue post-loop barrier");
-			exit(1);   
-		};   
-		
 		/* Update old forces */
 		err = clEnqueueNDRangeKernel(
 				queue,
@@ -680,16 +731,7 @@ int main() {
 			perror("Couldn't enqueue updateOldForces kernel");
 			exit(1);   
 		};   
-	
-		/* Synchronise */
-		err = clEnqueueBarrier(queue);
-		if(err < 0) {
-			printf("Iteration %u\n", i);
-			perror("Couldn't enqueue post-loop barrier");
-			exit(1);   
-		};   
 		
-
 		if (!(i % outputStep))
 		{
 			err = clEnqueueReadBuffer(
@@ -733,7 +775,7 @@ int main() {
 	clReleaseProgram(program);
 	clReleaseContext(context);
 
-	printf("Average iters: %f\n", iters / 500);
+	printf("Average iters: %f\n", iters / (500*outputStep));
 
 	return 0;
 }
