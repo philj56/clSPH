@@ -1,6 +1,6 @@
-# clPCISPH
+# clSPH
 
-My first real foray into an OpenCL project - this is an implementation of PCISPH from [Solenthaler & Pajarola 2009](http://dx.doi.org/10.1145/1531326.1531346).
+My first real foray into an OpenCL project - this is an implementation of IISPH from [Ihmsen et al. 2013](dx.doi.org/10.1109/tvcg.2013.105).
 
 Other papers used:
 
