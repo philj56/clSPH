@@ -111,7 +111,7 @@ __kernel void updateNormals(__global float3 *pos,
 
 __kernel void nonPressureForces(__global float3 *pos,
 						  	    __global float3 *vel,
-						  	    __global float3 *nonPressureForces,
+						  	    __global float4 *nonPressureForces,
 						  	    __global float *densities,
 						  	    __global float3 *normals,
 					   			__global size_t *neighbours,
@@ -132,8 +132,6 @@ __kernel void nonPressureForces(__global float3 *pos,
 
 	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
 	
-//	curvatureForce = normals[gID] * nNeighbours;
-
 	size_t j;
 	float surfaceTensionFactor;
 	float3 r;
@@ -164,108 +162,221 @@ __kernel void nonPressureForces(__global float3 *pos,
 
 	viscosityForce *= -params.monaghanSplinePrimeNormalisation * params.viscosity * params.particleMass;
 	cohesionForce *= -params.surfaceTensionNormalisation * params.surfaceTension * pown(params.particleMass, 2);
-	curvatureForce *= -params.surfaceTension * params.particleMass;;
+	curvatureForce *= -params.surfaceTension * params.particleMass;
 
-	nonPressureForces[gID] = viscosityForce + cohesionForce + curvatureForce + params.gravity * params.particleMass;
+	nonPressureForces[gID].xyz = viscosityForce + cohesionForce + curvatureForce + params.gravity * params.particleMass;
 }
 
-__kernel void initPressure(__global float4 *pressure)
-{
-	pressure[get_global_id(0)] = 0.0f;
-}
-
-__kernel void verletStep(__global float3 *posIn,
-						 __global float3 *velIn,
-						 __global float3 *posOut,
-						 __global float3 *velOut,
-						 __global float3 *nonPressureForces,
-						 __global float4 *pressure,
-						 __global float3 *oldForces,
-						 struct fluidParams params)
+__kernel void initPressure(__global float3 *pos,
+						   __global float3 *vel,
+						   __global float *density,
+						   __global float *densityGuess,
+						   __global float4 *pressure,
+						   __global float4 *coefficients,
+						   __global size_t *neighbours,
+						   struct fluidParams params)
 {
 	size_t gID;
-	float3 force;
+	size_t nNeighbours;
+
+	float dense;
+	float aii;
+	float3 dii;
+	
+	gID = get_global_id(0);
+	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
+
+	dense = 0.0f;
+	aii = 0.0f;
+	dii = 0.0f;
+
+	size_t j;
+	float weight;
+	float3 direction;
+
+	/* Calculate density & dii */
+	for (size_t i = 0; i < nNeighbours; i++)
+	{
+		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
+		weight = weightMonaghanSplinePrime(pos[gID] - pos[j], params.interactionRadius);
+		direction = fast_normalize(pos[gID] - pos[j]);
+
+		if (j != gID)
+		{
+			dii += weight * direction;
+			dense += weight * dot(vel[gID] - vel[j], direction);
+		}
+	}
+	
+	dii *= -params.particleMass * pown(params.timeStep, 2) * pown(density[gID], -2) * params.monaghanSplinePrimeNormalisation;
+	dense *= params.particleMass * params.timeStep * params.monaghanSplinePrimeNormalisation;
+
+	/* Predict density */
+	densityGuess[gID] = density[gID] + dense;
+	
+	/* Initialise pressure */
+	pressure[get_global_id(0)].w *= 0.5f;
+
+	float3 dji; 
+
+	/* Calculate aii */
+	for (size_t i = 0; i < nNeighbours; i++)
+	{
+		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
+		weight = weightMonaghanSplinePrime(pos[gID] - pos[j], params.interactionRadius);
+		direction = fast_normalize(pos[gID] - pos[j]);
+		
+
+		if (j != gID)
+		{
+			dji = params.particleMass * pown(params.timeStep, 2) * pown(density[gID], -2) * weight * direction * params.monaghanSplinePrimeNormalisation;
+			aii += dot(dii - dji, direction) * weight;
+		}
+	}
+
+	aii *= params.particleMass * params.monaghanSplinePrimeNormalisation;
+
+	/* Update coefficients */
+	coefficients[gID] = (float4) {dii, aii};
+}
+
+__kernel void updateDij(__global float3 *pos,
+						__global float *density,
+						__global float4 *pressure,
+						__global float3 *dij,
+						__global size_t *neighbours,
+						struct fluidParams params)
+{
+	size_t gID;
+	size_t nNeighbours;
+
+	float3 sum;
+
+	gID = get_global_id(0);
+	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
+	
+	sum = 0.0f;
+
+	size_t j;
+	for (size_t i = 0; i < nNeighbours; i++)
+	{
+		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
+
+		if (i != j)
+			sum += pressure[j].w * pown(density[j], -2) * weightMonaghanSplinePrime(pos[gID] - pos[j], params.interactionRadius) * fast_normalize(pos[gID] - pos[j]); 
+	}
+
+	sum *= -params.particleMass * pown(params.timeStep, 2) * params.monaghanSplinePrimeNormalisation;
+
+	dij[gID] = sum;
+}
+
+__kernel void timeStep(__global float3 *posIn,
+					   __global float3 *velIn,
+					   __global float3 *posOut,
+					   __global float3 *velOut,
+					   __global float4 *force,
+					   struct fluidParams params)
+{
+	size_t gID;
 	gID = get_global_id(0);
 
-	force = nonPressureForces[gID] + pressure[gID].xyz;
-//TODO: sort out actual verlet integration
-	velOut[gID] = velIn[gID] + params.timeStep * force / params.particleMass;
-	posOut[gID] = mad(velIn[gID], params.timeStep, posIn[gID]) + 0.5f * force * pown(params.timeStep, 2) / params.particleMass;
-
-
-//	posOut[gID] = posIn[gID] + params.timeStep * fma(params.timeStep, oldForces[gID] / params.particleMass, velIn[gID]);
-//	velOut[gID] = velIn[gID] + params.timeStep * 0.5f * (oldForces[gID] + nonPressureForces[gID] + pressure[gID].xyz) / params.particleMass;
-
-	/* Semi-Elastic Boundary */
-	if (isgreater(posOut[gID].x, 0.6f))
+	if (velOut != 0x0)
+		velOut[gID] = mad(force[gID].xyz / params.particleMass, (float3)params.timeStep, velIn[gID]);
+	if (posOut != 0x0)
 	{
-		posOut[gID].x = 1.2f - posOut[gID].x;
-	 	velOut[gID].x *= -0.5f;
-		velOut[gID].y *= 0.99f;
-		velOut[gID].z *= 0.99f;
-	}
-	else if (isless(posOut[gID].x, -0.6f))
-	{
-		posOut[gID].x = -1.2f - posOut[gID].x;
-		velOut[gID].x *= -0.5f;
-		velOut[gID].y *= 0.99f;
-		velOut[gID].z *= 0.99f;
-	}
+		posOut[gID] = mad(velIn[gID], params.timeStep, posIn[gID]);
 
-	if (isgreater(posOut[gID].y, 0.6f))
-	{
-		posOut[gID].y = 1.2f - posOut[gID].y;
-		velOut[gID].x *= 0.99f;
-		velOut[gID].y *= -0.5f;
-		velOut[gID].z *= 0.99f;
-	}
-	else if (isless(posOut[gID].y, -0.6f))
-	{
-		posOut[gID].y = -1.2f - posOut[gID].y;
-		velOut[gID].x *= 0.99f;
-		velOut[gID].y *= -0.5f;
-		velOut[gID].z *= 0.99f;
-	}
+		/* Semi-Elastic Boundary */
+		if (isgreater(posOut[gID].x, 0.6f))
+		{
+			posOut[gID].x = 1.2f - posOut[gID].x;
+		 	velOut[gID].x *= -0.5f;
+			velOut[gID].y *= 0.99f;
+			velOut[gID].z *= 0.99f;
+		}
+		else if (isless(posOut[gID].x, -0.6f))
+		{
+			posOut[gID].x = -1.2f - posOut[gID].x;
+			velOut[gID].x *= -0.5f;
+			velOut[gID].y *= 0.99f;
+			velOut[gID].z *= 0.99f;
+		}
+	
+		if (isgreater(posOut[gID].y, 0.6f))
+		{
+			posOut[gID].y = 1.2f - posOut[gID].y;
+			velOut[gID].x *= 0.99f;
+			velOut[gID].y *= -0.5f;
+			velOut[gID].z *= 0.99f;
+		}
+		else if (isless(posOut[gID].y, -0.6f))
+		{
+			posOut[gID].y = -1.2f - posOut[gID].y;
+			velOut[gID].x *= 0.99f;
+			velOut[gID].y *= -0.5f;
+			velOut[gID].z *= 0.99f;
+		}
 
-	if (isgreater(posOut[gID].z, 1.2f))
-	{
-		posOut[gID].z = 2.4f - posOut[gID].z;
-		velOut[gID].x *= 0.99f;
-		velOut[gID].y *= 0.99f;
-		velOut[gID].z *= -0.5f;
-	}
-	else if (isless(posOut[gID].z, -0.6f))
-	{
-		posOut[gID].z = -1.2f - posOut[gID].z;
-		velOut[gID].x *= 0.99f;
-		velOut[gID].y *= 0.99f;
-		velOut[gID].z *= -0.5f;
-	}
+		if (isgreater(posOut[gID].z, 1.2f))
+		{
+			posOut[gID].z = 2.4f - posOut[gID].z;
+			velOut[gID].x *= 0.99f;
+			velOut[gID].y *= 0.99f;
+			velOut[gID].z *= -0.5f;
+		}
+		else if (isless(posOut[gID].z, -0.6f))
+		{
+			posOut[gID].z = -1.2f - posOut[gID].z;
+			velOut[gID].x *= 0.99f;
+			velOut[gID].y *= 0.99f;
+			velOut[gID].z *= -0.5f;
+		}
 
-	posOut[gID] = clamp(posOut[gID], -10.0f, 10.0f);
-
+		posOut[gID] = clamp(posOut[gID], -10.0f, 10.0f);
+	}
 }
 
 __kernel void predictDensityPressure(__global float3 *pos,
+									 __global float *density,
+									 __global float *densityGuess,
 									 __global float *densityErrors,
 									 __global float4 *pressure, 
+						   			 __global float4 *coefficients,
+							 		 __global float3 *dij,
 					   				 __global size_t *neighbours,
-									 struct fluidParams params)
+	 								 struct fluidParams params)
 {
 	size_t gID;
-	size_t gSize;
 	size_t nNeighbours;
-	
-	gID = get_global_id(0);
-	gSize = get_global_size(0);
+	float factor;
 
+	gID = get_global_id(0);
 	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
+	factor = 0.0f;
+	
+	size_t j;
+	float weight;
+	float3 direction;
+	for (size_t i = 0; i < nNeighbours; i++)
+	{
+		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
+		weight = weightMonaghanSplinePrime(pos[gID] - pos[j], params.interactionRadius);
+		direction = fast_normalize(pos[gID] - pos[j]);
+
+		factor += dot(dij[gID] - coefficients[j].xyz * pressure[j].w - dij[j] 
+		       + params.particleMass * pown(params.timeStep, 2) * pown(density[gID], -2) * weight * params.monaghanSplinePrimeNormalisation 
+			   * direction * pressure[gID].w, weight*direction);
+	}
+
+	factor *= params.particleMass * params.monaghanSplinePrimeNormalisation;
 
 	/* Predict density error */
-	densityErrors[gID] = max(0.0f, density(pos, gID, &(neighbours[gID * (MAX_NEIGHBOURS + 1) + 1]), nNeighbours, params) - params.restDensity);
+	densityErrors[gID] = params.restDensity - densityGuess[gID] - factor;
 
 	/* Update pressure */
-	pressure[gID].w += densityErrors[gID] * params.pressureScalingFactor;
+	pressure[gID].w = (1.0f - params.relaxationFactor) * pressure[gID].w + (params.relaxationFactor / coefficients[gID].w) * densityErrors[gID];
+	pressure[gID].w = max(pressure[gID].w, 0.0f);
 }
 
 __kernel void pressureForces(__global float3 *pos,
@@ -300,18 +411,6 @@ __kernel void pressureForces(__global float3 *pos,
 	pressureForce *= -params.monaghanSplinePrimeNormalisation * pown(params.particleMass, 2);
 
 	pressure[gID].xyz = pressureForce;
-
-//	printf("pressure.w: %f\n", pressure[gID].w);
-}
-
-__kernel void updateOldForces(__global float3 *nonPressureForces,
-							  __global float4 *pressure,
-							  __global float3 *oldForces)
-{
-	size_t gID;
-	gID = get_global_id(0);
-
-	oldForces[gID] = nonPressureForces[gID] + pressure[gID].xyz;
 }
 
 float weightMonaghanSpline(float3 p12, float h)

@@ -33,7 +33,7 @@ struct fluidParams {
 	OPENCL_FLOAT3 gravity;	
 	OPENCL_FLOAT timeStep;
 
-	OPENCL_FLOAT pressureScalingFactor;
+	OPENCL_FLOAT relaxationFactor;
 };
 
 #ifndef OPENCL_COMPILING
@@ -85,67 +85,7 @@ struct fluidParams {
 		params->monaghanSplinePrimeNormalisation = 10.0f / (7.0f * pow(params->interactionRadius, 3));
 		params->surfaceTensionNormalisation = 32.0f / (M_PI * pow(params->interactionRadius, 9));
 		params->surfaceTensionTerm = -pow(params->interactionRadius, 6) / 64.0f;
-
-		double dense = 0;
-		const double beta = 2.0f * pow (params->timeStep * params->particleMass / params->restDensity, 2);
-
-		/* Sum of (kernel gradients) */
-		OPENCL_FLOAT delKernelSum[3] = {0.0f, 0.0f, 0.0f};
-		
-		/* Sum of (kernel gradients) magnitude squared */
-		OPENCL_FLOAT delKernelSumDotDelKernelSum = 0.0f;
-		
-		/* Sum of (kernel gradients magnitude squared) */
-		OPENCL_FLOAT delKernelDotDelKernelSum = 0.0f;
-
-		for (OPENCL_FLOAT x = -2.0f * params->interactionRadius; x <= 2.0f * params->interactionRadius; x += params->particleRadius)
-		{
-			for (OPENCL_FLOAT y = -2.0f * params->interactionRadius; y <= 2.0f * params->interactionRadius; y += params->particleRadius)
-			{
-				for (OPENCL_FLOAT z = -2.0f * params->interactionRadius; z <= 2.0f * params->interactionRadius; z += params->particleRadius)
-				{
-					OPENCL_FLOAT r2 = x * x + y * y + z * z;
-					OPENCL_FLOAT r = sqrt(r2);
-						
-					dense += weightMonaghanSpline(r, params->interactionRadius);
-
-					if(r < params->interactionRadius * 2.0f && r != 0.0f)
-					{
-						OPENCL_FLOAT factor = params->monaghanSplinePrimeNormalisation * weightMonaghanSplinePrime(r, params->interactionRadius);
-						factor /= r;
-
-
-						OPENCL_FLOAT delKernel[3] = {
-							factor * x,
-							factor * y,
-							factor * z
-						};
-
-						for (size_t i = 0; i < 3; i++)
-						{
-							/* Sum kernel gradients */
-							delKernelSum[i] += delKernel[i];
-
-							/* Sum (kernel gradients magnitude squared) */
-							delKernelDotDelKernelSum += pow (delKernel[i], 2);
-						}
-							
-					}
-				}
-			}
-		}
-
-		for (size_t i = 0; i < 3; i++)
-		{
-			delKernelSumDotDelKernelSum += pow (delKernelSum[i], 2);
-		}
-		//printf("Mass: %f\nIntRad: %f\nNormalisation: %f\nBeta: %e\nDelDotSum: %f\nDotDelSum: %f\n", params->particleMass, params->interactionRadius, params->monaghanSplineNormalisation, beta, delKernelDotDelKernelSum, delKernelSumDotDelKernelSum);
-
-		params->pressureScalingFactor = -1.0f / (beta * (-delKernelSumDotDelKernelSum - delKernelDotDelKernelSum));
-	//	printf("Pressure scale: %f\n", params->pressureScalingFactor);
-	//	printf("Density: %f\n", dense * params->particleMass * params->monaghanSplineNormalisation);
-	//	params->pressureScalingFactor /= 10.0f;
-	//	exit(0);
+		params->relaxationFactor = 0.5f;
 	}
 
 	/* Create fully initialised fluidParams from key inputs */
