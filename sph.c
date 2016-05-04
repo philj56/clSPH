@@ -111,10 +111,11 @@ bool checkDensityErrors(cl_float *densityError, size_t num_particles)
 	cl_float sum = 0.0f;
 	for (size_t i = 0; i < num_particles; i++)
 	{
-		sum += densityError[i];
+		if (densityError[i] > 0.0f)
+			sum += densityError[i];
 	}
 	
-	if (sum / (cl_float)num_particles > 10.0f)
+	if (sum / (cl_float)num_particles > 1.0f)
 		return true;
 
 	return false;
@@ -492,7 +493,7 @@ int main() {
 	
 	double iters = 0;
 	/* Execute kernels, read data and print */
-	for (unsigned int i = 0; i < 1000*outputStep; i++)
+	for (unsigned int i = 0; i < 500*outputStep; i++)
 	{	
 		/* Update neighbours */
 		err = clEnqueueNDRangeKernel(
@@ -594,7 +595,7 @@ int main() {
 		};   
 	
 		/* Pressure loop */
-		for(size_t l= 0; true/*l < 14*/; l++)
+		for(size_t l=0; l < 100; l++)
 		{
 			/* Calculate dij */
 			err = clEnqueueNDRangeKernel(

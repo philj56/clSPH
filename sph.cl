@@ -96,7 +96,7 @@ __kernel void updateNormals(__global float3 *pos,
 	{
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
 	
-		if (all(isequal(pos[gID], pos[j])))
+		if (gID == j)
 		{
 			continue;
 		}
@@ -215,7 +215,7 @@ __kernel void initPressure(__global float3 *pos,
 	densityGuess[gID] = density[gID] + dense;
 	
 	/* Initialise pressure */
-	pressure[get_global_id(0)].w *= 0.5f;
+	pressure[gID].w *= 0.5f;
 
 	float3 dji; 
 
@@ -229,7 +229,7 @@ __kernel void initPressure(__global float3 *pos,
 
 		if (j != gID)
 		{
-			dji = params.particleMass * pown(params.timeStep, 2) * pown(density[gID], -2) * weight * direction * params.monaghanSplinePrimeNormalisation;
+			dji = -params.particleMass * pown(params.timeStep, 2) * pown(density[j], -2) * weight * direction * params.monaghanSplinePrimeNormalisation;
 			aii += dot(dii - dji, direction) * weight;
 		}
 	}
@@ -372,10 +372,10 @@ __kernel void predictDensityPressure(__global float3 *pos,
 	factor *= params.particleMass * params.monaghanSplinePrimeNormalisation;
 
 	/* Predict density error */
-	densityErrors[gID] = params.restDensity - densityGuess[gID] - factor;
+	densityErrors[gID] = -params.restDensity + densityGuess[gID] + pressure[gID].w * coefficients[gID].w + factor;
 
 	/* Update pressure */
-	pressure[gID].w = (1.0f - params.relaxationFactor) * pressure[gID].w + (params.relaxationFactor / coefficients[gID].w) * densityErrors[gID];
+	pressure[gID].w = (1.0f - params.relaxationFactor) * pressure[gID].w + (params.relaxationFactor / coefficients[gID].w) * (params.restDensity - densityGuess[gID] - factor);
 	pressure[gID].w = max(pressure[gID].w, 0.0f);
 }
 
