@@ -158,7 +158,7 @@ __kernel void nonPressureForces(__global float3 *pos,
 		cohesionForce += surfaceTensionFactor * weightSurfaceTension(r, params.interactionRadius, params.surfaceTensionTerm) * direction;
 
 		/* Surface tension curvature */
-		curvatureForce += surfaceTensionFactor * normals[gID] - normals[j];
+		curvatureForce += surfaceTensionFactor * (normals[gID] - normals[j]);
 
 	}	
 

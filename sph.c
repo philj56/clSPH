@@ -146,7 +146,7 @@ int main() {
 	const size_t resolution = 10;
 	const size_t num_particles = resolution*resolution*resolution;
 	const size_t work_units = num_particles;
-	const size_t outputStep = 1;
+	const size_t outputStep = 4;
 
 	struct fluidParams simulationParams;
 	
@@ -177,10 +177,10 @@ int main() {
 		const cl_float  particleMass = restDensity / num_particles;
 		const cl_float  particleRadius = 1.0f/resolution;
 		const cl_float  interactionRadius = 2.0f * particleRadius;
-		const cl_float  timeStep = 0.004f;
+		const cl_float  timeStep = 0.001f;
 		const cl_float  viscosity = 0.001f;
-		const cl_float  surfaceTension = 1.0f;
-		const cl_float3 gravity = {{0.0f, 0.0f, 0.0f}};
+		const cl_float  surfaceTension = 0.0728f;
+		const cl_float3 gravity = {{0.0f, 0.0f, -9.81f}};
 		simulationParams = newFluidParams (particleMass, 
 						   particleRadius, 
 						   restDensity,
@@ -197,10 +197,10 @@ int main() {
 		{
 			for (size_t z = 0; z < resolution; z++)
 			{
-				pos[(x * resolution + y) * resolution + z] = (cl_float3) {{((float)x-resolution/2)*simulationParams.particleRadius + randRange(-0.01f, 0.01f),
-											   ((float)y-resolution/2)*simulationParams.particleRadius + randRange(-0.01f, 0.01f),
-											   ((float)z-resolution/2)*simulationParams.particleRadius + randRange(-0.01f, 0.01f)}};
-				vel[(x * resolution + y) * resolution + z] = (cl_float3) {{x*0.01f, y*0.01f, z*0.01f}};
+				pos[(x * resolution + y) * resolution + z] = (cl_float3) {{((float)x-resolution/2)*simulationParams.particleRadius,// + randRange(-0.01f, 0.01f),
+											   ((float)y-resolution/2)*simulationParams.particleRadius,// + randRange(-0.01f, 0.01f),
+											   ((float)z-resolution/2)*simulationParams.particleRadius}};// + randRange(-0.01f, 0.01f)}};
+				vel[(x * resolution + y) * resolution + z] = (cl_float3) {{0.0f, 0.0f, 0.0f}};
 			}
 		}
 	}
