@@ -389,12 +389,12 @@ __kernel void predictDensityPressure(__global struct particle *particles,
 
 	/* Update pressure */
 	if(self.advection != 0.0f)
-		temp = (1.0f - params.relaxationFactor) * self.pressure + (params.relaxationFactor / self.advection) * (params.restDensity - self.densityAdvection - factor);
+		temp = (1.0f - params.relaxationFactor) * self.pressure + (1.0f * params.relaxationFactor / self.advection) * (params.restDensity - self.densityAdvection - factor);
 	temp = max(temp, 0.0f);
 	pressureTemp[gID] = temp;
 
 	/* Predict density error */
-	particles[gID].density = self.densityAdvection + temp * self.advection + factor;
+//	particles[gID].density = self.densityAdvection + temp * self.advection + factor;
 	densityErrors[gID] = self.densityAdvection + temp * self.advection + factor - params.restDensity;
 }
 
@@ -454,6 +454,7 @@ float weightMonaghanSpline(float3 p12, float h)
 {
 	float q;
 	float w;
+	h *= 0.5f;
 
 	q = length(p12) / h;
 	w = 0.0f;
@@ -474,6 +475,7 @@ float weightMonaghanSplinePrime(float3 p12, float h)
 {
 	float r;
 	float w;
+	h *= 0.5f;
 
 	r = fast_length(p12);
 	w = 0.0f;

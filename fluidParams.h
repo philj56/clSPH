@@ -41,8 +41,8 @@ struct fluidParams {
 	/* Use spline weight from Monaghan 1992 */
 	void updateFluidParams (struct fluidParams *params)
 	{
-		params->monaghanSplineNormalisation = 1.0f / (M_PI * pow(params->interactionRadius, 3));
-		params->monaghanSplinePrimeNormalisation = 10.0f / (7.0f * pow(params->interactionRadius, 3));
+		params->monaghanSplineNormalisation = 1.0f / (M_PI * pow(params->interactionRadius * 0.5f, 3));
+		params->monaghanSplinePrimeNormalisation = 10.0f / (7.0f * pow(params->interactionRadius * 0.5f, 3));
 		params->surfaceTensionNormalisation = 32.0f / (M_PI * pow(params->interactionRadius, 9));
 		params->surfaceTensionTerm = -pow(params->interactionRadius, 6) / 64.0f;
 		params->relaxationFactor = 0.5f;

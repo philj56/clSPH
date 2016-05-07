@@ -12,7 +12,7 @@ unset key
 stats file
 N = 500 #floor(system("wc -l \`pwd\`/out.dat")/100.)
 do for [t=tWidth:N:tStep] {
-	set output sprintf("Frames/%04d.png", (t-tWidth-1)/tStep + 1)
+	set output sprintf("Frames/%04d.png", (t-tWidth)/tStep)
 	plot for [p=2:STATS_columns:3] file every ::t-tWidth::t u p:p+2 w p pt 7
 	print t
 }

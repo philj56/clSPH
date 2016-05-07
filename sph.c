@@ -125,8 +125,8 @@ bool checkDensityErrors(cl_float *densityError, size_t num_particles)
 		}
 	}
 	
-	printf("Max: %u,   %.4f\n", index, max);
-	printf("Average:   %.4f\n", sum / (cl_float)num);
+//	printf("Max: %u,   %.4f\n", index, max);
+//	printf("Average:   %.4f\n", sum / (cl_float)num);
 
 	if (num > 0 && sum / (cl_float)num > 1.0f)
 		return true;
@@ -652,7 +652,7 @@ int main() {
 			{
 //				if (particles[j].pos.x > 9.0f || particles[j].pos.y < -9.0f)
 //					printf("BROKEN!!!\n");
-//				printf("%.4f\t%.4f\t%.4f\t", particles[j].pos.x, particles[j].pos.y, particles[j].pos.z);
+				printf("%.4f\t%.4f\t%.4f\t", particles[j].pos.x, particles[j].pos.y, particles[j].pos.z);
 			}
 			printf("\n");
 		}	
