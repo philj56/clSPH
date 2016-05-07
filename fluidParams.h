@@ -37,46 +37,6 @@ struct fluidParams {
 };
 
 #ifndef OPENCL_COMPILING
-
-	/* Spline weight from Monaghan 1992, first derivative w.r.t. r */
-	OPENCL_FLOAT weightMonaghanSplinePrime(OPENCL_FLOAT r, OPENCL_FLOAT interactionRadius)
-	{
-		OPENCL_FLOAT w = 0.0f;
-	
-		if (r < interactionRadius)
-		{
-			w += r * (2.25f * r - 3.0f * interactionRadius);
-		}
-		else if (r < 2.0f * interactionRadius)
-		{
-			w += -3.0f * pow(interactionRadius - 0.5f * r, 2);
-		}
-
-		w *= pow(interactionRadius, -3);
-		
-		return w;
-	}
-
-	OPENCL_FLOAT weightMonaghanSpline(OPENCL_FLOAT r, OPENCL_FLOAT interactionRadius)
-	{
-		OPENCL_FLOAT q;
-		OPENCL_FLOAT w;
-	
-		q = r / interactionRadius;
-		w = 0.0f;
-	
-		if (islessequal(q, 1.0f))
-		{
-			w += 1.0f + q * q * (q * 0.75f - 1.5f);
-		}
-		else if (islessequal(q, 2.0f))
-		{
-			w += 0.25f * pow(2.0f - q, 3.0f);
-		}
-	
-		return w;
-	}
-	
 	/* Deduce attributes from timeStep, restDensity, particleRadius & viscosity */
 	/* Use spline weight from Monaghan 1992 */
 	void updateFluidParams (struct fluidParams *params)
