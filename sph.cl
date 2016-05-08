@@ -35,7 +35,7 @@ __kernel void findNeighbours (__global __read_only const struct particle *partic
 	for (size_t i = 0; i < gSize && nNeighbours < MAX_NEIGHBOURS; i++)
 	{
 		dist = distance(self.pos, particles[i].pos);
-		if (isless(dist, 2.0f * params.interactionRadius))
+		if (isless(dist, params.interactionRadius))
 		{
 			neighbours[gID * (MAX_NEIGHBOURS + 1) + ++nNeighbours] = i;
 		}
@@ -167,7 +167,7 @@ __kernel void nonPressureForces(__global struct particle *particles,
 	cohesionForce *= -params.surfaceTensionNormalisation * params.surfaceTension * pown(params.particleMass, 2);
 	curvatureForce *= -params.surfaceTension * params.particleMass;
 
-	particles[gID].velocityAdvection = self.vel + (viscosityForce + /*cohesionForce + curvatureForce +*/ params.gravity * params.particleMass) * params.timeStep / params.particleMass;
+	particles[gID].velocityAdvection = self.vel + (viscosityForce + cohesionForce + curvatureForce + params.gravity * params.particleMass) * params.timeStep / params.particleMass;
 }
 
 __kernel void initPressure(__global struct particle *particles,
@@ -298,9 +298,9 @@ __kernel void timeStep(__global struct particle *particles,
 	self.pos += self.vel * params.timeStep;
 
 	/* Semi-Elastic Boundary */
-	if (isgreater(self.pos.x, 0.6f))
+	if (isgreater(self.pos.x, 1.2f))
 	{
-		self.pos.x = 1.2f - self.pos.x;
+		self.pos.x = 2.4f - self.pos.x;
 	 	self.vel.x *= -0.5f;
 		self.vel.y *= 0.99f;
 		self.vel.z *= 0.99f;
@@ -327,9 +327,9 @@ __kernel void timeStep(__global struct particle *particles,
 		self.vel.y *= -0.5f;
 		self.vel.z *= 0.99f;
 	}
-	if (isgreater(self.pos.z, 1.2f))
+	if (isgreater(self.pos.z, 1.8f))
 	{
-		self.pos.z = 2.4f - self.pos.z;
+		self.pos.z = 3.6f - self.pos.z;
 		self.vel.x *= 0.99f;
 		self.vel.y *= 0.99f;
 		self.vel.z *= -0.5f;

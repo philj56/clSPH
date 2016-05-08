@@ -107,17 +107,17 @@ float randRange (float min, float max)
 	return random() * (max - min) / RAND_MAX + min;
 }
 
-bool checkDensityErrors(cl_float *densityError, size_t num_particles)
+bool checkDensityErrors(cl_float *densityError, size_t num_particles, float restDensity)
 {
-	float max = 0.0f;
-	size_t index = 0;
+//	float max = 0.0f;
+//	size_t index = 0;
 	size_t num = 0;
 	cl_float sum = 0.0f;
 	for (size_t i = 0; i < num_particles; i++)
 	{
-		if (densityError[i] > max){
-			max = densityError[i];
-			index = i;}
+//		if (densityError[i] > max){
+//			max = densityError[i];
+//			index = i;}
 		if (densityError[i] > 0.0f)
 		{
 			sum += densityError[i];
@@ -128,7 +128,7 @@ bool checkDensityErrors(cl_float *densityError, size_t num_particles)
 //	printf("Max: %u,   %.4f\n", index, max);
 //	printf("Average:   %.4f\n", sum / (cl_float)num);
 
-	if (num > 0 && sum / (cl_float)num > 1.0f)
+	if (num > 0 && sum / (cl_float)num > 0.001f * restDensity)
 		return true;
 
 	return false;
@@ -157,9 +157,9 @@ int main() {
 
 	/* Data */
 	const size_t resolution = 10;
-	const size_t num_particles = resolution*resolution*resolution;
+	const size_t num_particles = 2.0f*resolution*resolution*resolution;
 	const size_t work_units = num_particles;
-	const size_t outputStep = 4;
+	const size_t outputStep = 16;
 
 	struct fluidParams simulationParams;
 	
@@ -179,12 +179,12 @@ int main() {
 	/* Use SI units */
 	{
 		const cl_float  restDensity = 1000.0f;
-		const cl_float  particleMass = restDensity / num_particles;
+		const cl_float  particleMass = 2.0f*restDensity / num_particles;
 		const cl_float  particleRadius = 1.0f/resolution;
 		const cl_float  interactionRadius = 2.25f * particleRadius;
-		const cl_float  timeStep = 0.004f;
-		const cl_float  viscosity = 0.001f;
-		const cl_float  surfaceTension = 0.0728f;
+		const cl_float  timeStep = 0.001f;
+		const cl_float  viscosity = 0.00078f;
+		const cl_float  surfaceTension = 0.07197f;
 		const cl_float3 gravity = {{0.0f, 0.0f, -9.81f}};
 		simulationParams = newFluidParams (particleMass, 
 						   particleRadius, 
@@ -200,13 +200,13 @@ int main() {
 	{
 		for (size_t y = 0; y < resolution; y++)
 		{
-			for (size_t z = 0; z < resolution; z++)
+			for (size_t z = 0; z < 2*resolution; z++)
 			{
-				particles[(x * resolution + y) * resolution + z] = defaultParticle;
-				particles[(x * resolution + y) * resolution + z].pos = (cl_float3) {{((float)x-resolution/2)*simulationParams.particleRadius + randRange(-0.01f, 0.01f),
-											   ((float)y-resolution/2)*simulationParams.particleRadius + randRange(-0.01f, 0.01f),
-											   ((float)z-resolution/2)*simulationParams.particleRadius + randRange(-0.01f, 0.01f)}};
-				particles[(x * resolution + y) * resolution + z].vel = (cl_float3) {{0.0f, 0.0f, 0.0f}};
+				particles[(x * resolution + y) * 2 * resolution + z] = defaultParticle;
+				particles[(x * resolution + y) * 2 * resolution + z].pos = (cl_float3) {{((float)x-resolution/2)*simulationParams.particleRadius*1.1f + randRange(-0.01f, 0.01f),
+											   ((float)y-resolution/2)*simulationParams.particleRadius*1.1f + randRange(-0.01f, 0.01f),
+											   ((float)z-resolution/2)*simulationParams.particleRadius*1.1f + randRange(-0.01f, 0.01f)}};
+				particles[(x * resolution + y) * 2 * resolution + z].vel = (cl_float3) {{0.0f, 0.0f, 0.0f}};
 			}
 		}
 	}
@@ -430,9 +430,18 @@ int main() {
 
 	double iters = 0;
 	/* Execute kernels, read data and print */
-	for (unsigned int i = 0; i < 500*outputStep; i++)
-	{	
-		/* Update neighbours */
+	for (unsigned int i = 0; i < 300*outputStep; i++)
+	{
+/*		if (i == 301 * outputStep)
+		{
+			simulationParams.gravity = (cl_float3){{0.0f, 0.0f, -9.81f}};
+			err = clSetKernelArg (nonPressureForces, 2, sizeof(struct fluidParams), &simulationParams);
+			if(err < 0) {
+				perror("Couldn't change gravity");
+				exit(1);   
+			};
+		}
+*/		/* Update neighbours */
 		err = clEnqueueNDRangeKernel(
 				queue,
 				findNeighbours,
@@ -515,7 +524,7 @@ int main() {
 		};   
 	
 		/* Pressure loop */
-		for(size_t l=0; true/*l < 20*/; l++)
+		for(size_t l=0; l < 100; l++)
 		{
 			/* Calculate dij */
 			err = clEnqueueNDRangeKernel(
@@ -587,7 +596,7 @@ int main() {
 					exit(1);   
 				};
 
-				if (!checkDensityErrors(densityError, num_particles))
+				if (!checkDensityErrors(densityError, num_particles, simulationParams.restDensity))
 				{
 					iters += (double)l;
 					break;
@@ -650,8 +659,6 @@ int main() {
 			printf("%u\t", i);
 			for (size_t j = 0; j < num_particles; j++)
 			{
-//				if (particles[j].pos.x > 9.0f || particles[j].pos.y < -9.0f)
-//					printf("BROKEN!!!\n");
 				printf("%.4f\t%.4f\t%.4f\t", particles[j].pos.x, particles[j].pos.y, particles[j].pos.z);
 			}
 			printf("\n");
