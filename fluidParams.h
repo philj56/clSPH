@@ -68,8 +68,8 @@ struct fluidParams {
 			.viscosity         = viscosity,
 			.surfaceTension    = surfaceTension,
 			.gravity           = gravity
-		};
-	
+		};	
+
 		updateFluidParams (&params);
 	
 		return params;
