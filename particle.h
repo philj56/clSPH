@@ -19,14 +19,16 @@
 struct particle {
 	OPENCL_FLOAT3 pos;
 	OPENCL_FLOAT3 vel;
-	OPENCL_FLOAT  density;
-	OPENCL_FLOAT  pressure;
-	OPENCL_FLOAT  advection;
-	OPENCL_FLOAT  densityAdvection;
 	OPENCL_FLOAT3 velocityAdvection;
 	OPENCL_FLOAT3 displacement;
 	OPENCL_FLOAT3 sumPressureMovement;
 	OPENCL_FLOAT3 normal;
+	
+	OPENCL_FLOAT  density;
+	OPENCL_FLOAT  pressure;
+	OPENCL_FLOAT  advection;
+	OPENCL_FLOAT  densityAdvection;
+	OPENCL_FLOAT  kernelCorrection;
 };
 
 #ifndef OPENCL_COMPILING
@@ -34,14 +36,15 @@ struct particle {
 	{
 		{{0.0f}},
 		{{0.0f}},
+		{{0.0f}},
+		{{0.0f}},
+		{{0.0f}},
+		{{0.0f}},	
 		0.0f,
 		0.0f,	
 		0.0f,
 		0.0f,
-		{{0.0f}},
-		{{0.0f}},
-		{{0.0f}},
-		{{0.0f}}	
+		1.0f
 	};
 #endif
 

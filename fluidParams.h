@@ -16,6 +16,9 @@
 	#define OPENCL_FLOAT cl_float
 #endif /* OPENCL_COMPILING */
 
+#define MAX_NEIGHBOURS 400
+
+
 struct fluidParams {
 	OPENCL_FLOAT particleMass;
 	OPENCL_FLOAT particleRadius;
@@ -28,12 +31,12 @@ struct fluidParams {
 	OPENCL_FLOAT surfaceTension;
 	OPENCL_FLOAT surfaceTensionTerm;
 	OPENCL_FLOAT surfaceTensionNormalisation;
-
+	
 	OPENCL_FLOAT viscosity;
-	OPENCL_FLOAT3 gravity;	
 	OPENCL_FLOAT timeStep;
-
 	OPENCL_FLOAT relaxationFactor;
+
+	OPENCL_FLOAT3 gravity;	
 };
 
 #ifndef OPENCL_COMPILING

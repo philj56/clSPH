@@ -2,8 +2,6 @@
 #include "fluidParams.h"
 #include "particle.h"
 
-#define MAX_NEIGHBOURS 1000
-
 float weightMonaghanSpline(float3 p12, float interactionRadius);
 
 float weightMonaghanSplinePrime(float3 p12, float interactionRadius);
@@ -35,9 +33,10 @@ __kernel void findNeighbours (__global __read_only const struct particle *partic
 	for (size_t i = 0; i < gSize && nNeighbours < MAX_NEIGHBOURS; i++)
 	{
 		dist = distance(self.pos, particles[i].pos);
-		if (isless(dist, params.interactionRadius))
+		if (isless(dist, params.interactionRadius) && i != gID)
 		{
-			neighbours[gID * (MAX_NEIGHBOURS + 1) + ++nNeighbours] = i;
+			nNeighbours++;
+			neighbours[gID * (MAX_NEIGHBOURS + 1) + nNeighbours] = i;
 		}
 	}
 
@@ -49,13 +48,11 @@ __kernel void updateDensity(__global struct particle *particles,
 							const struct fluidParams params)
 {
 	size_t gID;
-	size_t gSize;
 	size_t nNeighbours;
-	float density = 0.0f;
+	float density = 1.0f;
 	struct particle self;
 
 	gID = get_global_id(0);
-	gSize = get_global_size(0);
 	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
 	
 	self = particles[gID];
@@ -67,9 +64,52 @@ __kernel void updateDensity(__global struct particle *particles,
 		density += weightMonaghanSpline(self.pos - particles[j].pos, params.interactionRadius);
 	}
 
-	density *= params.monaghanSplineNormalisation * params.particleMass;
+	density *= params.monaghanSplineNormalisation * params.particleMass * self.kernelCorrection;
 
 	particles[gID].density = density;	
+}
+
+__kernel void correctKernel(__global struct particle *particles,
+						    __global __read_only const size_t *neighbours,
+							const struct fluidParams params)
+{
+	size_t gID;
+	size_t nNeighbours;
+	float density = 1.0f;
+	float correction;
+	struct particle self;
+	
+	gID = get_global_id(0);;
+	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
+
+	if (nNeighbours <= 3)
+	{
+		particles[gID].kernelCorrection = 1.0f;
+		return;
+	}
+	
+	correction = 0.0f;
+	self = particles[gID];
+
+	size_t j;
+	struct particle other;
+	for (size_t i = 0; i < nNeighbours; i++)
+	{
+		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
+		other = particles[j];
+
+		correction += weightMonaghanSpline(self.pos - other.pos, params.interactionRadius) / other.density;
+		density += weightMonaghanSpline(self.pos - other.pos, params.interactionRadius);
+	}
+
+	correction += 1.0f / self.density;
+
+	correction *= params.particleMass * params.monaghanSplineNormalisation;
+	density *= params.monaghanSplineNormalisation * params.particleMass;// * self.kernelCorrection;
+
+	//particles[gID].kernelCorrection = 1.0f / clamp(correction, 0.1f, 1.0f); 
+	particles[gID].density = 1.0f / correction * density;
+//	particles[gID].kernelCorrection = 1.0f /
 }
 
 __kernel void updateNormals(__global struct particle *particles,
@@ -95,9 +135,6 @@ __kernel void updateNormals(__global struct particle *particles,
 	{
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
 		other = particles[j];
-		
-		if (gID == j)
-			continue;
 		
 		normal += weightMonaghanSplinePrime(self.pos - other.pos, params.interactionRadius) * fast_normalize(self.pos - other.pos) 
 			      / other.density;
@@ -141,9 +178,6 @@ __kernel void nonPressureForces(__global struct particle *particles,
 		other = particles[j];
 		r = self.pos - other.pos;
 		direction = normalize(r);
-
-		if (j == gID)
-			continue;
 
 		surfaceTensionFactor = 2.0f * params.restDensity / (self.density + other.density);
 
@@ -205,11 +239,8 @@ __kernel void initPressure(__global struct particle *particles,
 		weight = weightMonaghanSplinePrime(self.pos - other.pos, params.interactionRadius);
 		direction = normalize(self.pos - other.pos);
 
-		if (j != gID)
-		{
-			dii += weight * direction;
-			density += dot(self.velocityAdvection - other.velocityAdvection, weight * direction);
-		}
+		dii += weight * direction;
+		density += dot(self.velocityAdvection - other.velocityAdvection, weight * direction);
 	}
 	
 	dii *= -params.particleMass * pown(params.timeStep, 2) * pown(self.density, -2) * params.monaghanSplinePrimeNormalisation;
@@ -232,11 +263,8 @@ __kernel void initPressure(__global struct particle *particles,
 		direction = normalize(self.pos - other.pos);
 		
 
-		if (j != gID)
-		{
-			dji = params.particleMass * pown(params.timeStep, 2) * pown(self.density, -2) * weight * direction * params.monaghanSplinePrimeNormalisation;
-			aii += dot(dii - dji, weight * direction);
-		}
+		dji = params.particleMass * pown(params.timeStep, 2) * pown(self.density, -2) * weight * direction * params.monaghanSplinePrimeNormalisation;
+		aii += dot(dii - dji, weight * direction);
 	}
 
 	aii *= params.particleMass * params.monaghanSplinePrimeNormalisation;
@@ -273,10 +301,7 @@ __kernel void updateDij(__global struct particle *particles,
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
 		other = particles[j];
 
-		if (gID != j)
-		{
-			sum += other.pressure * pown(other.density, -2) * weightMonaghanSplinePrime(self.pos - other.pos, params.interactionRadius) * normalize(self.pos - other.pos);
-		}	
+		sum += other.pressure * pown(other.density, -2) * weightMonaghanSplinePrime(self.pos - other.pos, params.interactionRadius) * normalize(self.pos - other.pos);
 	}
 
 	sum *= -params.particleMass * pown(params.timeStep, 2) * params.monaghanSplinePrimeNormalisation;
@@ -374,12 +399,9 @@ __kernel void predictDensityPressure(__global struct particle *particles,
 		weight = weightMonaghanSplinePrime(self.pos - other.pos, params.interactionRadius);
 		direction = normalize(self.pos - other.pos);
 
-		if (gID != j)
-		{
-			factor += dot(self.sumPressureMovement - other.displacement * other.pressure - other.sumPressureMovement 
-			       + params.particleMass * pown(params.timeStep, 2) * pown(self.density, -2) * weight * params.monaghanSplinePrimeNormalisation 
-				   * direction * self.pressure, weight*direction);
-		}
+		factor += dot(self.sumPressureMovement - other.displacement * other.pressure - other.sumPressureMovement 
+		       + params.particleMass * pown(params.timeStep, 2) * pown(self.density, -2) * weight * params.monaghanSplinePrimeNormalisation 
+			   * direction * self.pressure, weight*direction);
 	}
 
 	factor *= params.particleMass * params.monaghanSplinePrimeNormalisation;	
@@ -436,8 +458,6 @@ __kernel void pressureForces(__global __read_only const struct particle *particl
 	{
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
 		other = particles[j];
-		if (j == gID)
-			continue;
 		pressureForce += mad(other.pressure, pown(other.density, -2), pRhoSqr) * weightMonaghanSplinePrime(self.pos - other.pos, params.interactionRadius) * fast_normalize(self.pos - other.pos);
 	}
 
@@ -453,70 +473,32 @@ __kernel void pressureForces(__global __read_only const struct particle *particl
 float weightMonaghanSpline(float3 p12, float h)
 {
 	float q;
-	float w;
 	h *= 0.5f;
 
-	q = length(p12) / h;
-	w = 0.0f;
+	q = fast_length(p12) / h;
 
-	if (islessequal(q, 1.0f))
-	{
-		w += mad(q * q, mad(q, 0.75f, -1.5f), 1.0f);
-	}
-	else if (islessequal(q, 2.0f))
-	{
-		w += 0.25f * pow(2.0f - q, 3.0f);
-	}
-
-	return w;
+	return islessequal(q, 1.0f) * mad(q * q, mad(q, 0.75f, -1.5f), 1.0f) + 			/* q < 1 */
+		   isgreater(q, 1.0f) * islessequal(q, 2.0f) * 0.25f * pow(2.0f - q, 3.0f);	/* 1 < q < 2 */
 }
 
 float weightMonaghanSplinePrime(float3 p12, float h)
 {
 	float r;
-	float w;
 	h *= 0.5f;
 
 	r = fast_length(p12);
-	w = 0.0f;
 
-	if (islessequal(r, h))
-	{
-		w += r * mad(r, 3.0f, -4.0f * h);
-	}
-	else if (islessequal(r, 2.0f * h))
-	{
-		w += -pown(mad(-2.0f, h, r), 2);
-	}
-		
-	w *= 0.75f * pown(h, -2);
-
-	return w;
+	return 0.75f * pown(h, -2) * (islessequal(r, h) * r * mad(r, 3.0f, -4.0f * h)								/* r < 0.5h */
+								  - isgreater(r, h) * islessequal(r, 2.0f * h) * pown(mad(-2.0f, h, r), 2));	/* 0.5h < r < h */
 }
 
 float weightSurfaceTension(float3 p12, float h, float extraTerm)
 {
 	float r;
-	float w;
-
 	r = fast_length(p12);
-	w = 0.0f;
 
-	if (islessequal(r, 0.001f * h))
-	{
-		return w;	
-	}
-
-	if (islessequal(r, h))
-	{
-		w += pown((h - r) * r, 3);
-	}
-	if (islessequal(2.0f * r, h))
-	{
-		w = mad(2.0f, w, extraTerm);
-	}
-
-	return w;
+	return isgreater(r, 0.001f * h) * islessequal(r, h) * pown((h - r) * r, 3) 			/* r < h */
+		   * (1.0f + islessequal(2.0f * r, h)) + islessequal(2.0f * r, h) * extraTerm;	/* r < h/2 */
 }
 
 
@@ -530,11 +512,6 @@ float viscosityMonaghan(float3 p12,
 {
 	float vd = dot(v12, p12);
 	
-	if (isgreater(vd, 0.0f))
-	{
-		return 0.0f;
-	}
-	
 	// Arbitrary terms - see Monaghan 1992
 	float alpha, beta, etaSqr;
 	alpha  = 1;
@@ -545,10 +522,9 @@ float viscosityMonaghan(float3 p12,
 	float c;
 	c = 1400;
 
-
 	float mu12;
 	mu12 = (interactionRadius * vd) / (dot(p12, p12) + etaSqr);
 
-	return mu12 * mad(-alpha, c, beta * mu12) / rhoAvg;	
+	return isless(vd, 0.0f) * mu12 * mad(-alpha, c, beta * mu12) / rhoAvg;	
 }
 

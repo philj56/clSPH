@@ -28,6 +28,8 @@ cl_device_id create_device() {
 	cl_device_id dev;
 	int err;
 
+	char name[50];
+
 	/* Identify a platform */
 	err = clGetPlatformIDs(1, &platform, NULL);
 	if(err < 0) {
@@ -35,9 +37,13 @@ cl_device_id create_device() {
 		exit(1);
 	} 
 
+	clGetPlatformInfo(platform, CL_PLATFORM_NAME, sizeof(name), &name, NULL);
+	printf("Using platform %s\n", name);
+
 	/* Access a device */
 	err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &dev, NULL);
 	if(err == CL_DEVICE_NOT_FOUND) {
+		printf("No GPU found, reverting to CPU\n");
 		err = clGetDeviceIDs(platform, CL_DEVICE_TYPE_CPU, 1, &dev, NULL);
 	}
 	if(err < 0) {
@@ -85,7 +91,7 @@ cl_program build_program(cl_context ctx, cl_device_id dev, const char* filename)
 	free(program_buffer);
 
 	/* Build program */
-	err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+	err = clBuildProgram(program, 0, NULL, "-I.", NULL, NULL);
 	if(err < 0) {
 
 		/* Find size of log and print to std output */
@@ -104,10 +110,10 @@ cl_program build_program(cl_context ctx, cl_device_id dev, const char* filename)
 }
 
 // Quick and dirty random float in range
-float randRange (float min, float max)
+/*float randRange (float min, float max)
 {
 	return random() * (max - min) / RAND_MAX + min;
-}
+}*/
 
 bool checkDensityErrors(cl_float *densityError, size_t num_particles, float restDensity)
 {
@@ -127,17 +133,16 @@ bool checkDensityErrors(cl_float *densityError, size_t num_particles, float rest
 		}
 	}
 	
-//	printf("Max: %u,   %.4f\n", index, max);
+//	printf("Max: %lu,   %.4f\n", index, max);
 //	printf("Average:   %.4f\n", sum / (cl_float)num);
 
-	if (num > 0 && sum / (cl_float)num > 0.0005f * restDensity)
+	if (num > 0 && sum / (cl_float)num > 0.001f * restDensity)
 		return true;
 
 	return false;
 }
 
 int main() {
-
 	/* OpenCL data structures */
 	cl_device_id device;
 	cl_context context;
@@ -148,6 +153,7 @@ int main() {
 	/* Kernels */
 	cl_kernel nonPressureForces;
 	cl_kernel initPressure;
+	cl_kernel correctKernel;
 	cl_kernel updateDensity;
 	cl_kernel updateNormals;
 	cl_kernel updateDij;
@@ -158,11 +164,13 @@ int main() {
 	cl_kernel findNeighbours;
 
 	/* Data */
-	const size_t num_frames = 450;
-	const size_t resolution = 18;
+	const char*  cacheDir = "cache_shepard";
+	const char*  cacheName = "shepard";
+	const size_t num_frames = 300;
+	const size_t resolution = 10;
 	const size_t num_particles = resolution*resolution*resolution;
 	const size_t work_units = num_particles;
-	const size_t outputStep = 32;
+	const size_t outputStep = 8;
 
 	struct fluidParams simulationParams;
 	
@@ -171,23 +179,24 @@ int main() {
 
 	/* Buffers */
 	cl_mem particleBuffer;
+	cl_mem boundaryBuffer;
 	cl_mem densityErrorBuffer;
 	cl_mem pressureBuffer;
 	cl_mem pressureTempBuffer;
 	cl_mem neighbourBuffer;
 
-	srandom(time(NULL));
+//	srandom(time(NULL));
 
-	/* Setup input data */	
+	/* Setup fluid parameters */	
 	/* Use SI units */
 	{
-		const cl_float  restDensity = 13560.0f;
+		const cl_float  restDensity = 1000.0f;
 		const cl_float  particleMass = restDensity / num_particles;
 		const cl_float  particleRadius = 1.0f/resolution;
 		const cl_float  interactionRadius = 2.25f * particleRadius;
-		const cl_float  timeStep = 0.0005f;
-		const cl_float  viscosity = 0.0015f;
-		const cl_float  surfaceTension = 0.487f;
+		const cl_float  timeStep = 0.002f;
+		const cl_float  viscosity = 0.00089f;
+		const cl_float  surfaceTension = 0.0725f;
 		const cl_float3 gravity = {{0.0f, 0.0f, 0.0f}};
 		simulationParams = newFluidParams (particleMass, 
 						   particleRadius, 
@@ -199,6 +208,8 @@ int main() {
 						   gravity);
 	}
 
+	/* Populate particle array */
+	const float spacingFactor = 1.1f;
 	for (size_t x = 0; x < resolution; x++)
 	{
 		for (size_t y = 0; y < resolution; y++)
@@ -206,13 +217,15 @@ int main() {
 			for (size_t z = 0; z < resolution; z++)
 			{
 				particles[(x * resolution + y) * resolution + z] = defaultParticle;
-				particles[(x * resolution + y) * resolution + z].pos = (cl_float3) {{((float)x-resolution/2)*simulationParams.particleRadius*1.1f + randRange(-0.01f, 0.01f),
-											   ((float)y-resolution/2)*simulationParams.particleRadius*1.1f + randRange(-0.01f, 0.01f),
-											   ((float)z-resolution/2)*simulationParams.particleRadius*1.1f + randRange(-0.01f, 0.01f)}};
+				particles[(x * resolution + y) * resolution + z].pos = (cl_float3) {{((float)x-resolution/2)*simulationParams.particleRadius*spacingFactor /*+ randRange(-0.01f, 0.01f)*/,
+											   ((float)y-resolution/2)*simulationParams.particleRadius*spacingFactor /*+ randRange(-0.01f, 0.01f)*/,
+											   ((float)z-resolution/2)*simulationParams.particleRadius*spacingFactor /*+ randRange(-0.01f, 0.01f)*/}};
 				particles[(x * resolution + y) * resolution + z].vel = (cl_float3) {{0.0f, 0.0f, 0.0f}};
 			}
 		}
 	}
+
+		
 	
 	/* Create a device and context */
 	device = create_device();
@@ -252,7 +265,7 @@ int main() {
 	};
 	
 	neighbourBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE, 
-				    	sizeof(size_t) * num_particles * 1001, NULL, &err);
+				    	sizeof(size_t) * num_particles * (MAX_NEIGHBOURS + 1), NULL, &err);
 	if(err < 0) {
 		perror("Couldn't create neighbour buffer");
 		exit(1);   
@@ -270,6 +283,12 @@ int main() {
 	initPressure = clCreateKernel(program, "initPressure", &err);
 	if(err < 0) {
 		perror("Couldn't create initPressure kernel");
+		exit(1);   
+	};
+	
+	correctKernel = clCreateKernel(program, "correctKernel", &err);
+	if(err < 0) {
+		perror("Couldn't create correctKernel kernel");
 		exit(1);   
 	};
 
@@ -338,6 +357,16 @@ int main() {
 	
 	if(err < 0) {
 		perror("Couldn't set initPressure kernel args");
+		exit(1);   
+	};
+
+
+	err  = clSetKernelArg (correctKernel, 0, sizeof(cl_mem), &particleBuffer);
+	err |= clSetKernelArg (correctKernel, 1, sizeof(cl_mem), &neighbourBuffer);
+	err |= clSetKernelArg (correctKernel, 2, sizeof(struct fluidParams), &simulationParams);
+	
+	if(err < 0) {
+		perror("Couldn't set correctKernel kernel args");
 		exit(1);   
 	};
 
@@ -431,12 +460,44 @@ int main() {
 		exit(1);   
 	};   
 
+	/* Initialise neighbours and density */
+/*	err = clEnqueueNDRangeKernel(
+			queue,
+			findNeighbours,
+			1,
+			NULL,
+			&work_units,
+			NULL,
+			0,
+			NULL,
+			NULL);
+	if(err < 0) {
+		perror("Couldn't enqueue findNeighbours kernel");
+		exit(1);   
+	};   
+
+	err = clEnqueueNDRangeKernel(
+			queue,
+			updateDensity,
+			1,
+			NULL,
+			&work_units,
+			NULL,
+			0,
+			NULL,
+			NULL);
+	if(err < 0) {
+		perror("Couldn't enqueue updateDensity kernel");
+		exit(1);   
+	};  
+*/
 	double iters = 0;
 	/* Execute kernels, read data and print */
 	for (unsigned int i = 0; i < num_frames*outputStep; i++)
 	{
-		if (i == 151 * outputStep)
+		if (i == 101 * outputStep)
 		{
+			printf("Gravity change!\n");
 			simulationParams.gravity = (cl_float3){{0.0f, 0.0f, -9.81f}};
 			err = clSetKernelArg (nonPressureForces, 2, sizeof(struct fluidParams), &simulationParams);
 			if(err < 0) {
@@ -444,6 +505,7 @@ int main() {
 				exit(1);   
 			};
 		}
+		
 		/* Update neighbours */
 		err = clEnqueueNDRangeKernel(
 				queue,
@@ -460,22 +522,71 @@ int main() {
 			exit(1);   
 		};   
 		
-		/* Update density */
-		err = clEnqueueNDRangeKernel(
-				queue,
-				updateDensity,
-				1,
-				NULL,
-				&work_units,
-				NULL,
-				0,
-				NULL,
-				NULL);
-		if(err < 0) {
-			perror("Couldn't enqueue updateDensity kernel");
-			exit(1);   
-		};   
-		
+		/* Correct kernel and density every 10 steps */
+		if ((i % 10) == 1)
+		{
+			err = clEnqueueNDRangeKernel(
+					queue,
+					correctKernel,
+					1,
+					NULL,
+					&work_units,
+					NULL,
+					0,
+					NULL,
+					NULL);
+			if(err < 0) {
+				perror("Couldn't enqueue correctKernel kernel");
+				exit(1);   
+			}  	
+		}
+		else
+		{
+			/* Update density */
+			err = clEnqueueNDRangeKernel(
+					queue,
+					updateDensity,
+					1,
+					NULL,
+					&work_units,
+					NULL,
+					0,
+					NULL,
+					NULL);
+			if(err < 0) {
+				perror("Couldn't enqueue updateDensity kernel");
+				exit(1);   
+			}  
+		}
+		/*****************************************/
+/*			err = clEnqueueReadBuffer(
+					queue,
+					particleBuffer,
+					CL_TRUE,
+					0,
+					sizeof(struct particle) * num_particles,
+					particles,
+					0,
+					NULL,
+					NULL);
+	
+			if(err < 0) {
+				perror("Couldn't enqueue read");
+				exit(1);   
+			};
+	
+			cl_float maxd = 0.0f;
+			for (size_t j = 0; j < 101; j++)
+			{
+				if (particles[j].density > maxd)
+				{
+					maxd = particles[j].density;
+				}
+			}
+				printf("Max: %f\n", maxd);
+				exit(0);
+*/
+		/****************************************/
 		/* Update fluid normals */
 		err = clEnqueueNDRangeKernel(
 				queue,
@@ -641,6 +752,7 @@ int main() {
 			exit(1);   
 		};   
 		
+		/* Write output data */
 		if (!(i % outputStep))
 		{
 			err = clEnqueueReadBuffer(
@@ -658,8 +770,9 @@ int main() {
 				perror("Couldn't enqueue read");
 				exit(1);   
 			};
-	
-			bphysWriteFrame(particles, num_particles, i / outputStep, "cache_test", "mercury");
+
+			bphysWriteFrame(particles, num_particles, i / outputStep, cacheDir, cacheName);
+			printf("Wrote frame %lu\n", i / outputStep);
 		}	
 	}
 
