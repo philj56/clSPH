@@ -29,9 +29,24 @@ struct particle {
 	OPENCL_FLOAT  advection;
 	OPENCL_FLOAT  densityAdvection;
 	OPENCL_FLOAT  kernelCorrection;
+	
+	OPENCL_FLOAT  mass;
+	OPENCL_FLOAT  radius;
+	OPENCL_FLOAT  restDensity;	
+	OPENCL_FLOAT  interactionRadius;
+
+	OPENCL_FLOAT  monaghanSplineNormalisation;
+	OPENCL_FLOAT  monaghanSplinePrimeNormalisation;
+
+	OPENCL_FLOAT  surfaceTension;
+	OPENCL_FLOAT  surfaceTensionTerm;
+	OPENCL_FLOAT  surfaceTensionNormalisation;
+	
+	OPENCL_FLOAT  viscosity;
 };
 
 #ifndef OPENCL_COMPILING
+	/* Default particle - 0.1m^3 water particle at origin */
 	const struct particle defaultParticle =
 	{
 		{{0.0f}},
@@ -44,8 +59,27 @@ struct particle {
 		0.0f,	
 		0.0f,
 		0.0f,
-		1.0f
+		1.0f,
+		1.0f,
+		0.1f,
+		1000.0f,
+		0.225f,
+		223.56f,
+		1003.33f,
+		0.0725f,
+		-0.000002027f,
+		6892193.195f,
+		0.00089f
 	};
+	
+	void updateDeducedParams (struct particle *particle)
+	{
+		particle->monaghanSplineNormalisation = 1.0f / (M_PI * pow(particle->interactionRadius * 0.5f, 3));
+		particle->monaghanSplinePrimeNormalisation = 10.0f / (7.0f * pow(particle->interactionRadius * 0.5f, 3));
+		particle->surfaceTensionNormalisation = 32.0f / (M_PI * pow(particle->interactionRadius, 9));
+		particle->surfaceTensionTerm = -pow(particle->interactionRadius, 6) / 64.0f;
+	}
+
 #endif
 
 #endif /* PARTICLE_H */

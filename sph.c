@@ -115,7 +115,7 @@ cl_program build_program(cl_context ctx, cl_device_id dev, const char* filename)
 	return random() * (max - min) / RAND_MAX + min;
 }*/
 
-bool checkDensityErrors(cl_float *densityError, size_t num_particles, float restDensity)
+bool checkDensityErrors(cl_float *densityError, size_t num_particles)
 {
 //	float max = 0.0f;
 //	size_t index = 0;
@@ -136,7 +136,7 @@ bool checkDensityErrors(cl_float *densityError, size_t num_particles, float rest
 //	printf("Max: %lu,   %.4f\n", index, max);
 //	printf("Average:   %.4f\n", sum / (cl_float)num);
 
-	if (num > 0 && sum / (cl_float)num > 0.001f * restDensity)
+	if (num > 0 && sum / (cl_float)num > 0.001f)
 		return true;
 
 	return false;
@@ -172,7 +172,12 @@ int main() {
 	const size_t work_units = num_particles;
 	const size_t outputStep = 8;
 
-	struct fluidParams simulationParams;
+	struct fluidParams simulationParams = 
+	{
+		.gravity = {{0.0f, 0.0f, 0.0f}},
+		.timeStep = 0.002f,
+		.relaxationFactor = 0.5f
+	};
 	
 	struct particle particles[num_particles];
 	cl_float densityError[num_particles];
@@ -190,41 +195,46 @@ int main() {
 	/* Setup fluid parameters */	
 	/* Use SI units */
 	{
-		const cl_float  restDensity = 1000.0f;
-		const cl_float  particleMass = restDensity / num_particles;
-		const cl_float  particleRadius = 1.0f/resolution;
-		const cl_float  interactionRadius = 2.25f * particleRadius;
-		const cl_float  timeStep = 0.002f;
-		const cl_float  viscosity = 0.00089f;
-		const cl_float  surfaceTension = 0.0725f;
-		const cl_float3 gravity = {{0.0f, 0.0f, 0.0f}};
-		simulationParams = newFluidParams (particleMass, 
-						   particleRadius, 
-						   restDensity,
-						   interactionRadius,
-						   timeStep,
-						   viscosity,
-						   surfaceTension,
-						   gravity);
-	}
-
-	/* Populate particle array */
-	const float spacingFactor = 1.1f;
-	for (size_t x = 0; x < resolution; x++)
-	{
-		for (size_t y = 0; y < resolution; y++)
+		struct particle particleTemplate =
 		{
-			for (size_t z = 0; z < resolution; z++)
+			.pos                 = {{0.0f}},
+			.vel                 = {{0.0f}},
+			.velocityAdvection   = {{0.0f}},
+			.displacement        = {{0.0f}},
+			.sumPressureMovement = {{0.0f}},
+			.normal              = {{0.0f}},
+			.density             = 0.0f,
+			.pressure            = 0.0f,
+			.advection           = 0.0f,
+			.densityAdvection    = 0.0f,
+			.kernelCorrection    = 1.0f,
+			.mass                = 1000.0f / num_particles,
+			.radius              = 1.0f / resolution,
+			.restDensity         = 1000.0f,
+			.interactionRadius   = 2.25f / resolution,
+			.surfaceTension      = 0.0725f,
+			.viscosity           = 0.00089f
+		};
+
+		updateDeducedParams (&particleTemplate);
+	
+		/* Populate particle array */
+		const float spacingFactor = 1.1f;
+		for (size_t x = 0; x < resolution; x++)
+		{
+			for (size_t y = 0; y < resolution; y++)
 			{
-				particles[(x * resolution + y) * resolution + z] = defaultParticle;
-				particles[(x * resolution + y) * resolution + z].pos = (cl_float3) {{((float)x-resolution/2)*simulationParams.particleRadius*spacingFactor /*+ randRange(-0.01f, 0.01f)*/,
-											   ((float)y-resolution/2)*simulationParams.particleRadius*spacingFactor /*+ randRange(-0.01f, 0.01f)*/,
-											   ((float)z-resolution/2)*simulationParams.particleRadius*spacingFactor /*+ randRange(-0.01f, 0.01f)*/}};
-				particles[(x * resolution + y) * resolution + z].vel = (cl_float3) {{0.0f, 0.0f, 0.0f}};
+				for (size_t z = 0; z < resolution; z++)
+				{
+					particles[(x * resolution + y) * resolution + z] = particleTemplate;
+					particles[(x * resolution + y) * resolution + z].pos = (cl_float3) {{((float)x-resolution/2)*particleTemplate.radius*spacingFactor /*+ randRange(-0.01f, 0.01f)*/,
+												   ((float)y-resolution/2)*particleTemplate.radius*spacingFactor /*+ randRange(-0.01f, 0.01f)*/,
+												   ((float)z-resolution/2)*particleTemplate.radius*spacingFactor /*+ randRange(-0.01f, 0.01f)*/}};
+					particles[(x * resolution + y) * resolution + z].vel = (cl_float3) {{0.0f, 0.0f, 0.0f}};
+				}
 			}
 		}
 	}
-
 		
 	
 	/* Create a device and context */
@@ -363,7 +373,6 @@ int main() {
 
 	err  = clSetKernelArg (correctKernel, 0, sizeof(cl_mem), &particleBuffer);
 	err |= clSetKernelArg (correctKernel, 1, sizeof(cl_mem), &neighbourBuffer);
-	err |= clSetKernelArg (correctKernel, 2, sizeof(struct fluidParams), &simulationParams);
 	
 	if(err < 0) {
 		perror("Couldn't set correctKernel kernel args");
@@ -373,7 +382,6 @@ int main() {
 
 	err  = clSetKernelArg (updateDensity, 0, sizeof(cl_mem), &particleBuffer);
 	err |= clSetKernelArg (updateDensity, 1, sizeof(cl_mem), &neighbourBuffer);
-	err |= clSetKernelArg (updateDensity, 2, sizeof(struct fluidParams), &simulationParams);
 	
 	if(err < 0) {
 		perror("Couldn't set updateDensity kernel args");
@@ -383,7 +391,6 @@ int main() {
 
 	err  = clSetKernelArg (updateNormals, 0, sizeof(cl_mem), &particleBuffer);
 	err |= clSetKernelArg (updateNormals, 1, sizeof(cl_mem), &neighbourBuffer);
-	err |= clSetKernelArg (updateNormals, 2, sizeof(struct fluidParams), &simulationParams);
 	
 	if(err < 0) {
 		perror("Couldn't set updateNormals kernel args");
@@ -436,7 +443,6 @@ int main() {
 	err  = clSetKernelArg (pressureForces, 0, sizeof(cl_mem), &particleBuffer);
 	err |= clSetKernelArg (pressureForces, 1, sizeof(cl_mem), &neighbourBuffer);
 	err |= clSetKernelArg (pressureForces, 2, sizeof(cl_mem), &pressureBuffer);
-	err |= clSetKernelArg (pressureForces, 3, sizeof(struct fluidParams), &simulationParams);
 	
 	if(err < 0) {
 		perror("Couldn't set pressureForces kernel args");
@@ -710,7 +716,7 @@ int main() {
 					exit(1);   
 				};
 
-				if (!checkDensityErrors(densityError, num_particles, simulationParams.restDensity))
+				if (!checkDensityErrors(densityError, num_particles))
 				{
 					iters += (double)l;
 					break;

@@ -33,7 +33,7 @@ __kernel void findNeighbours (__global __read_only const struct particle *partic
 	for (size_t i = 0; i < gSize && nNeighbours < MAX_NEIGHBOURS; i++)
 	{
 		dist = distance(self.pos, particles[i].pos);
-		if (isless(dist, params.interactionRadius) && i != gID)
+		if (isless(dist, self.interactionRadius) && i != gID)
 		{
 			nNeighbours++;
 			neighbours[gID * (MAX_NEIGHBOURS + 1) + nNeighbours] = i;
@@ -44,8 +44,7 @@ __kernel void findNeighbours (__global __read_only const struct particle *partic
 }
 
 __kernel void updateDensity(__global struct particle *particles,
-					   		__global __read_only const size_t *neighbours,
-							const struct fluidParams params)
+					   		__global __read_only const size_t *neighbours)
 {
 	size_t gID;
 	size_t nNeighbours;
@@ -58,20 +57,22 @@ __kernel void updateDensity(__global struct particle *particles,
 	self = particles[gID];
 	
 	size_t j;
+	struct particle other;
 	for (size_t i = 0; i < nNeighbours; i++)
 	{
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
-		density += weightMonaghanSpline(self.pos - particles[j].pos, params.interactionRadius);
+		other = particles[j];
+
+		density += other.mass * weightMonaghanSpline(self.pos - other.pos, self.interactionRadius);
 	}
 
-	density *= params.monaghanSplineNormalisation * params.particleMass * self.kernelCorrection;
+	density *= self.monaghanSplineNormalisation * self.kernelCorrection;
 
 	particles[gID].density = density;	
 }
 
 __kernel void correctKernel(__global struct particle *particles,
-						    __global __read_only const size_t *neighbours,
-							const struct fluidParams params)
+						    __global __read_only const size_t *neighbours)
 {
 	size_t gID;
 	size_t nNeighbours;
@@ -98,23 +99,21 @@ __kernel void correctKernel(__global struct particle *particles,
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
 		other = particles[j];
 
-		correction += weightMonaghanSpline(self.pos - other.pos, params.interactionRadius) / other.density;
-		density += weightMonaghanSpline(self.pos - other.pos, params.interactionRadius);
+		correction += other.mass * weightMonaghanSpline(self.pos - other.pos, self.interactionRadius) / other.density;
+		density += other.mass * weightMonaghanSpline(self.pos - other.pos, self.interactionRadius);
 	}
 
 	correction += 1.0f / self.density;
 
-	correction *= params.particleMass * params.monaghanSplineNormalisation;
-	density *= params.monaghanSplineNormalisation * params.particleMass;// * self.kernelCorrection;
+	correction *= self.monaghanSplineNormalisation;
+	density *= self.monaghanSplineNormalisation;
 
-	//particles[gID].kernelCorrection = 1.0f / clamp(correction, 0.1f, 1.0f); 
 	particles[gID].density = 1.0f / correction * density;
-//	particles[gID].kernelCorrection = 1.0f /
+//	particles[gID].kernelCorrection = 1.0f / correction;
 }
 
 __kernel void updateNormals(__global struct particle *particles,
-							__global __read_only const size_t *neighbours,
-							const struct fluidParams params)
+							__global __read_only const size_t *neighbours)
 {
 	size_t gID;
 	size_t gSize;
@@ -136,11 +135,11 @@ __kernel void updateNormals(__global struct particle *particles,
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
 		other = particles[j];
 		
-		normal += weightMonaghanSplinePrime(self.pos - other.pos, params.interactionRadius) * fast_normalize(self.pos - other.pos) 
+		normal += other.mass * weightMonaghanSplinePrime(self.pos - other.pos, self.interactionRadius) * fast_normalize(self.pos - other.pos) 
 			      / other.density;
 	}
 
-	normal *= params.interactionRadius * params.particleMass * params.monaghanSplinePrimeNormalisation;
+	normal *= self.interactionRadius * self.mass * self.monaghanSplinePrimeNormalisation;
 
 	particles[gID].normal = normal;
 }
@@ -179,29 +178,29 @@ __kernel void nonPressureForces(__global struct particle *particles,
 		r = self.pos - other.pos;
 		direction = normalize(r);
 
-		surfaceTensionFactor = 2.0f * params.restDensity / (self.density + other.density);
+		surfaceTensionFactor = 2.0f * self.restDensity / (self.density + other.density);
 
 		/* Viscosity */
 		viscosityForce += viscosityMonaghan(r, 
 								   self.vel - other.vel, 
 								   (self.density + other.density) * 0.5f, 
-								   params.interactionRadius)
-			   			* weightMonaghanSplinePrime(r, params.interactionRadius)
-			   			* direction;
+								   self.interactionRadius)
+			   			* weightMonaghanSplinePrime(r, self.interactionRadius)
+			   			* direction * other.mass;
 		
 		/* Surface tension cohesion */
-		cohesionForce += surfaceTensionFactor * weightSurfaceTension(r, params.interactionRadius, params.surfaceTensionTerm) * direction;
+		cohesionForce += surfaceTensionFactor * other.mass * weightSurfaceTension(r, self.interactionRadius, self.surfaceTensionTerm) * direction;
 
 		/* Surface tension curvature */
 		curvatureForce += surfaceTensionFactor * (self.normal - other.normal);
 
 	}	
 
-	viscosityForce *= -params.monaghanSplinePrimeNormalisation * params.viscosity * params.particleMass;
-	cohesionForce *= -params.surfaceTensionNormalisation * params.surfaceTension * pown(params.particleMass, 2);
-	curvatureForce *= -params.surfaceTension * params.particleMass;
+	viscosityForce *= -self.monaghanSplinePrimeNormalisation * self.viscosity;
+	cohesionForce *= -self.surfaceTensionNormalisation * self.surfaceTension * self.mass;
+	curvatureForce *= -self.surfaceTension * self.mass;
 
-	particles[gID].velocityAdvection = self.vel + (viscosityForce + cohesionForce + curvatureForce + params.gravity * params.particleMass) * params.timeStep / params.particleMass;
+	particles[gID].velocityAdvection = self.vel + (viscosityForce + cohesionForce + curvatureForce + params.gravity * self.mass) * params.timeStep / self.mass;
 }
 
 __kernel void initPressure(__global struct particle *particles,
@@ -236,21 +235,21 @@ __kernel void initPressure(__global struct particle *particles,
 	{
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
 		other = particles[j];
-		weight = weightMonaghanSplinePrime(self.pos - other.pos, params.interactionRadius);
+		weight = weightMonaghanSplinePrime(self.pos - other.pos, self.interactionRadius);
 		direction = normalize(self.pos - other.pos);
 
-		dii += weight * direction;
-		density += dot(self.velocityAdvection - other.velocityAdvection, weight * direction);
+		dii += other.mass * weight * direction;
+		density += other.mass * dot(self.velocityAdvection - other.velocityAdvection, weight * direction);
 	}
 	
-	dii *= -params.particleMass * pown(params.timeStep, 2) * pown(self.density, -2) * params.monaghanSplinePrimeNormalisation;
-	density *= params.particleMass * params.timeStep * params.monaghanSplinePrimeNormalisation;
+	dii *= -pown(params.timeStep, 2) * pown(self.density, -2) * self.monaghanSplinePrimeNormalisation;
+	density *= params.timeStep * self.monaghanSplinePrimeNormalisation;
 	
 	/* Predict density */
 	self.densityAdvection = self.density + density;
 	
 	/* Initialise pressure */
-	self.pressure = self.pressure * 0.5f;
+	self.pressure *= 0.5f;
 
 	float3 dji; 
 
@@ -259,15 +258,15 @@ __kernel void initPressure(__global struct particle *particles,
 	{
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
 		other = particles[j];
-		weight = weightMonaghanSplinePrime(self.pos - other.pos, params.interactionRadius);
+		weight = weightMonaghanSplinePrime(self.pos - other.pos, self.interactionRadius);
 		direction = normalize(self.pos - other.pos);
 		
 
-		dji = params.particleMass * pown(params.timeStep, 2) * pown(self.density, -2) * weight * direction * params.monaghanSplinePrimeNormalisation;
-		aii += dot(dii - dji, weight * direction);
+		dji = self.mass * pown(params.timeStep, 2) * pown(self.density, -2) * weight * direction * self.monaghanSplinePrimeNormalisation;
+		aii += other.mass * dot(dii - dji, weight * direction);
 	}
 
-	aii *= params.particleMass * params.monaghanSplinePrimeNormalisation;
+	aii *= self.monaghanSplinePrimeNormalisation;
 
 	/* Update coefficients */
 	self.displacement = dii;
@@ -301,10 +300,10 @@ __kernel void updateDij(__global struct particle *particles,
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
 		other = particles[j];
 
-		sum += other.pressure * pown(other.density, -2) * weightMonaghanSplinePrime(self.pos - other.pos, params.interactionRadius) * normalize(self.pos - other.pos);
+		sum += other.mass * other.pressure * pown(other.density, -2) * weightMonaghanSplinePrime(self.pos - other.pos, self.interactionRadius) * normalize(self.pos - other.pos);
 	}
 
-	sum *= -params.particleMass * pown(params.timeStep, 2) * params.monaghanSplinePrimeNormalisation;
+	sum *= -pown(params.timeStep, 2) * self.monaghanSplinePrimeNormalisation;
 
 	particles[gID].sumPressureMovement = sum;
 }
@@ -319,7 +318,7 @@ __kernel void timeStep(__global struct particle *particles,
 	gID = get_global_id(0);
 	self = particles[gID];
 
-	self.vel = self.velocityAdvection + params.timeStep * force[gID].xyz / params.particleMass;
+	self.vel = self.velocityAdvection + params.timeStep * force[gID].xyz / self.mass;
 	self.pos += self.vel * params.timeStep;
 
 	/* Semi-Elastic Boundary */
@@ -396,28 +395,28 @@ __kernel void predictDensityPressure(__global struct particle *particles,
 	{
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
 		other = particles[j];
-		weight = weightMonaghanSplinePrime(self.pos - other.pos, params.interactionRadius);
+		weight = weightMonaghanSplinePrime(self.pos - other.pos, self.interactionRadius);
 		direction = normalize(self.pos - other.pos);
 
-		factor += dot(self.sumPressureMovement - other.displacement * other.pressure - other.sumPressureMovement 
-		       + params.particleMass * pown(params.timeStep, 2) * pown(self.density, -2) * weight * params.monaghanSplinePrimeNormalisation 
+		factor += other.mass * dot(self.sumPressureMovement - other.displacement * other.pressure - other.sumPressureMovement 
+		       + self.mass * pown(params.timeStep, 2) * pown(self.density, -2) * weight * self.monaghanSplinePrimeNormalisation 
 			   * direction * self.pressure, weight*direction);
 	}
 
-	factor *= params.particleMass * params.monaghanSplinePrimeNormalisation;	
+	factor *= self.monaghanSplinePrimeNormalisation;	
 
 	float temp;
-
+	temp = 0.0f;
 
 	/* Update pressure */
 	if(self.advection != 0.0f)
-		temp = (1.0f - params.relaxationFactor) * self.pressure + (1.0f * params.relaxationFactor / self.advection) * (params.restDensity - self.densityAdvection - factor);
+		temp = (1.0f - params.relaxationFactor) * self.pressure + (1.0f * params.relaxationFactor / self.advection) * (self.restDensity - self.densityAdvection - factor);
 	temp = max(temp, 0.0f);
 	pressureTemp[gID] = temp;
 
 	/* Predict density error */
 //	particles[gID].density = self.densityAdvection + temp * self.advection + factor;
-	densityErrors[gID] = self.densityAdvection + temp * self.advection + factor - params.restDensity;
+	densityErrors[gID] = (self.densityAdvection + temp * self.advection + factor - self.restDensity) / self.restDensity;
 }
 
 __kernel void copyPressure(__global __read_only const float *in,
@@ -432,8 +431,7 @@ __kernel void copyPressure(__global __read_only const float *in,
 
 __kernel void pressureForces(__global __read_only const struct particle *particles,
 					   		 __global __read_only const size_t *neighbours,
-							 __global __write_only float4 *pressure,
-							 const struct fluidParams params)
+							 __global __write_only float4 *pressure)
 {
 	size_t gID;
 	size_t gSize;
@@ -458,10 +456,10 @@ __kernel void pressureForces(__global __read_only const struct particle *particl
 	{
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
 		other = particles[j];
-		pressureForce += mad(other.pressure, pown(other.density, -2), pRhoSqr) * weightMonaghanSplinePrime(self.pos - other.pos, params.interactionRadius) * fast_normalize(self.pos - other.pos);
+		pressureForce += other.mass * mad(other.pressure, pown(other.density, -2), pRhoSqr) * weightMonaghanSplinePrime(self.pos - other.pos, self.interactionRadius) * fast_normalize(self.pos - other.pos);
 	}
 
-	pressureForce *= -params.monaghanSplinePrimeNormalisation * pown(params.particleMass, 2);
+	pressureForce *= -self.monaghanSplinePrimeNormalisation * self.mass;
 
 	pressure[gID].xyz = pressureForce;
 	
