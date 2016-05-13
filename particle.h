@@ -42,7 +42,19 @@ struct particle {
 	OPENCL_FLOAT  surfaceTensionTerm;
 	OPENCL_FLOAT  surfaceTensionNormalisation;
 	
+	OPENCL_FLOAT  adhesion;
+	OPENCL_FLOAT  adhesionNormalisation;
+	
 	OPENCL_FLOAT  viscosity;
+};
+
+struct boundaryParticle {
+	OPENCL_FLOAT3 pos;
+	OPENCL_FLOAT  interactionRadius;
+	OPENCL_FLOAT  volume;
+	OPENCL_FLOAT  adhesionModifier;
+	OPENCL_FLOAT  viscosity;
+	OPENCL_FLOAT  monaghanSplineNormalisation;
 };
 
 #ifndef OPENCL_COMPILING
@@ -69,15 +81,33 @@ struct particle {
 		0.0725f,
 		-0.000002027f,
 		6892193.195f,
+		0.0725f,
+		0.892288f,
 		0.00089f
 	};
-	
+
+	const struct boundaryParticle defaultBoundaryParticle =
+	{
+		{{0.0f}},
+		0.225f,
+		0.0f,
+		1.0f,
+		0.0f,
+		223.56f
+	};
+
 	void updateDeducedParams (struct particle *particle)
 	{
 		particle->monaghanSplineNormalisation = 1.0f / (M_PI * pow(particle->interactionRadius * 0.5f, 3));
 		particle->monaghanSplinePrimeNormalisation = 10.0f / (7.0f * pow(particle->interactionRadius * 0.5f, 3));
 		particle->surfaceTensionNormalisation = 32.0f / (M_PI * pow(particle->interactionRadius, 9));
 		particle->surfaceTensionTerm = -pow(particle->interactionRadius, 6) / 64.0f;
+		particle->adhesionNormalisation = 0.007f * pow(particle->interactionRadius, -3.25);
+	}
+	
+	void updateDeducedBoundaryParams (struct boundaryParticle *particle)
+	{
+		particle->monaghanSplineNormalisation = 1.0f / (M_PI * pow(particle->interactionRadius * 0.5f, 3));
 	}
 
 #endif
