@@ -23,5 +23,6 @@ struct fluidParams {
 	OPENCL_FLOAT3 gravity;	
 	OPENCL_FLOAT timeStep;
 	OPENCL_FLOAT relaxationFactor;
+	OPENCL_FLOAT gridSize;
 };
 #endif /* FLUID_PARAMS_H */

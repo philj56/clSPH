@@ -198,12 +198,13 @@ int main() {
 
 	/* Setup fluid parameters */	
 	/* Use SI units where applicable */
-	
+	/* gridSize should be the minimum particle interaction radius */
 	struct fluidParams simulationParams = 
 	{
 		.gravity = {{0.0f, 0.0f, -9.81f}},
 		.timeStep = 0.002f,
-		.relaxationFactor = 0.5f
+		.relaxationFactor = 0.5f,
+		.gridSize = 0.1125f
 	};
 
 	{
@@ -550,10 +551,9 @@ int main() {
 	err |= clSetKernelArg (findNeighbours, 5, sizeof(struct fluidParams), &simulationParams);
 	
 	if(err < 0) {
-		perror("Couldn't set updateOldForces kernel args");
+		perror("Couldn't set findNeighbours kernel args");
 		exit(1);   
 	};
-
 
 	/* Create a command queue */
 	queue = clCreateCommandQueue(context, device, 0, &err);
@@ -594,6 +594,7 @@ int main() {
 	};  
 */
 
+	clock_t t = clock();
 	/* Calculate boundary particle volumes */
 	err = clEnqueueNDRangeKernel(
 			queue,
@@ -609,9 +610,11 @@ int main() {
 		perror("Couldn't enqueue updateBoundaryVolumes kernel");
 		exit(1);   
 	}; 
+	clFinish(queue);
+	printf("Finding boundary volumes: %f seconds\n", (float)(clock() - t) / CLOCKS_PER_SEC);
+	t = clock();
 
 	double iters = 0;
-	clock_t t;
 	/* Execute kernels, read data and print */
 	for (unsigned int i = 0; i < num_frames*outputStep; i++)
 	{
@@ -626,7 +629,7 @@ int main() {
 			};
 		}
 */		
-		t = clock();
+
 		/* Update neighbours */
 		err = clEnqueueNDRangeKernel(
 				queue,
