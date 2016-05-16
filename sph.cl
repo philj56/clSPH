@@ -23,19 +23,12 @@ __kernel void findNeighbours (__global __read_only const particle_t *particles,
 							  const size_t nBoundaryParticles,
 					   		  __constant fluid_t *params)
 {
-	size_t gID;
-	size_t gSize;
-	size_t nNeighbours;
-	size_t nBoundaryNeighbours;
+	size_t gID = get_global_id(0);
+	size_t gSize = get_global_size(0);
+	size_t nNeighbours = 0;
+	size_t nBoundaryNeighbours = 0;
 	float dist;
-	particle_t self;
-
-	gID = get_global_id(0);
-	gSize = get_global_size(0);
-	nNeighbours = 0;
-	nBoundaryNeighbours = 0;
-
-	self = particles[gID];
+	particle_t self = particles[gID];
 
 	for (size_t i = 0; i < gSize && nNeighbours < MAX_NEIGHBOURS; i++)
 	{
@@ -64,16 +57,10 @@ __kernel void findNeighbours (__global __read_only const particle_t *particles,
 __kernel void updateBoundaryVolumes(__global particle_t *particles,
 									__constant fluid_t *params)
 {
-	size_t gID;
-	size_t gSize;
-	float sum;
-	particle_t self;
-
-	gID = get_global_id(0);
-	gSize = get_global_size(0);
-	sum = 0.0f;
-
-	self = particles[gID];
+	size_t gID = get_global_id(0);
+	size_t gSize = get_global_size(0);
+	float sum = 0.0f;
+	particle_t self = particles[gID];
 
 	for (size_t i = 0; i < gSize; i++)
 	{
@@ -90,17 +77,11 @@ __kernel void updateDensity(__global particle_t *particles,
 					   		__global __read_only const size_t *boundaryNeighbours,
 							__constant fluid_t *params)
 {
-	size_t gID;
-	size_t nNeighbours;
-	size_t nBoundaryNeighbours;
+	size_t gID = get_global_id(0);
+	size_t nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
+	size_t nBoundaryNeighbours = boundaryNeighbours[gID * (MAX_NEIGHBOURS + 1)];
 	float density = 1.0f;
-	particle_t self;
-
-	gID = get_global_id(0);
-	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
-	nBoundaryNeighbours = boundaryNeighbours[gID * (MAX_NEIGHBOURS + 1)];
-	
-	self = particles[gID];
+	particle_t self = particles[gID];
 	
 	size_t j;
 	particle_t other;
@@ -136,20 +117,13 @@ __kernel void correctKernel(__global particle_t *particles,
 					   		__global __read_only const size_t *boundaryNeighbours,
 							__constant fluid_t *params)
 {
-	size_t gID;
-	size_t nNeighbours;
-	size_t nBoundaryNeighbours;
+	size_t gID = get_global_id(0);
+	size_t nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
+	size_t nBoundaryNeighbours = boundaryNeighbours[gID * (MAX_NEIGHBOURS + 1)];
 	float density = 1.0f;
-	float correction;
-	particle_t self;
+	float correction = 0.0f;
+	particle_t self = particles[gID];
 	
-	gID = get_global_id(0);
-	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
-	nBoundaryNeighbours = boundaryNeighbours[gID * (MAX_NEIGHBOURS + 1)];
-	
-	correction = 0.0f;
-	self = particles[gID];
-
 	size_t j;
 	particle_t other;
 	
@@ -193,19 +167,14 @@ __kernel void updateNormals(__global particle_t *particles,
 							__global __read_only const size_t *neighbours,
 							__constant fluid_t *params)
 {
-	size_t gID;
-	size_t nNeighbours;
-	float3 normal;
-	particle_t self;
-
-	gID = get_global_id(0);
-	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
-	normal = 0.0f;
-
-	self = particles[gID];
+	size_t gID = get_global_id(0);
+	size_t nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
+	float3 normal = 0.0f;
+	particle_t self = particles[gID];
 
 	size_t j;
 	particle_t other;
+
 	for (size_t i = 0; i < nNeighbours; i++)
 	{
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
@@ -226,25 +195,14 @@ __kernel void nonPressureForces(__global particle_t *particles,
 					   			__global __read_only const size_t *boundaryNeighbours,
 						  	    __constant fluid_t *params)
 {
-	size_t gID;
-	size_t nNeighbours;
-	size_t nBoundaryNeighbours;
-	float3 viscosityForce;
-	float3 cohesionForce;
-	float3 curvatureForce;
-	float3 adhesionForce;
-	particle_t self;
-
-	gID = get_global_id(0);
-	viscosityForce = 0.0f;
-	cohesionForce = 0.0f;
-	curvatureForce = 0.0f;
-	adhesionForce = 0.0f;
-
-	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
-	nBoundaryNeighbours = boundaryNeighbours[gID * (MAX_NEIGHBOURS + 1)];
-	
-	self = particles[gID];
+	size_t gID = get_global_id(0);
+	size_t nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
+	size_t nBoundaryNeighbours = boundaryNeighbours[gID * (MAX_NEIGHBOURS + 1)];
+	float3 viscosityForce = 0.0f;
+	float3 cohesionForce = 0.0f;
+	float3 curvatureForce = 0.0f;
+	float3 adhesionForce = 0.0f;
+	particle_t self = particles[gID];
 
 	size_t j;
 	float surfaceTensionFactor;
@@ -313,29 +271,18 @@ __kernel void initPressure(__global particle_t *particles,
 					   	   __global __read_only const size_t *boundaryNeighbours,
 						   __constant fluid_t *params)
 {
-	size_t gID;
-	size_t nNeighbours;
-	size_t nBoundaryNeighbours;
-
-	float density;
-	float aii;
-	float3 dii;
-
-	particle_t self;
+	size_t gID = get_global_id(0);
+	size_t nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
+	size_t nBoundaryNeighbours = boundaryNeighbours[gID * (MAX_NEIGHBOURS + 1)];
+	float density = 0.0f;
+	float aii = 0.0f;
+	float3 dii = 0.0f;
+	particle_t self = particles[gID];
 	
-	gID = get_global_id(0);
-	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
-	nBoundaryNeighbours = boundaryNeighbours[gID * (MAX_NEIGHBOURS + 1)];
-
-	density = 0.0f;
-	aii = 0.0f;
-	dii = 0.0f;
-
-	self = particles[gID];
-
 	size_t j;
 	float weight;
 	float3 direction;
+	float3 dji; 
 	particle_t other;
 
 	/* Calculate density & dii */
@@ -370,8 +317,6 @@ __kernel void initPressure(__global particle_t *particles,
 	
 	/* Initialise pressure */
 	self.pressure *= 0.5f;
-
-	float3 dji; 
 
 	/* Calculate aii */
 	for (size_t i = 0; i < nNeighbours; i++)
@@ -411,22 +356,14 @@ __kernel void updateDij(__global particle_t *particles,
 						__global __read_only const size_t *neighbours,
 						__constant fluid_t *params)
 {
-	size_t gID;
-	size_t nNeighbours;
-
-	float3 sum;
-
-	particle_t self;
-
-	gID = get_global_id(0);
-	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
-	
-	sum = 0.0f;
-
-	self = particles[gID];
+	size_t gID = get_global_id(0);
+	size_t nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
+	float3 sum = 0.0f;
+	particle_t self = particles[gID];
 
 	size_t j;
 	particle_t other;
+
 	for (size_t i = 0; i < nNeighbours; i++)
 	{
 		j = neighbours[gID * (MAX_NEIGHBOURS + 1) + 1 + i];
@@ -444,62 +381,14 @@ __kernel void timeStep(__global particle_t *particles,
 					   __global __read_only const float4 *force,
 					   __constant fluid_t *params)
 {
-	size_t gID;
-	particle_t self;
-
-	gID = get_global_id(0);
-	self = particles[gID];
+	size_t gID = get_global_id(0);
+	particle_t self = particles[gID];
 
 	self.vel = self.velocityAdvection + params[self.fluidIndex].timeStep * force[gID].xyz / params[self.fluidIndex].mass;
 	self.pos += self.vel * params[self.fluidIndex].timeStep;
 
-	/* Semi-Elastic Boundary */
-/*	if (isgreater(self.pos.x, 2.4f))
-	{
-		self.pos.x = 4.8f - self.pos.x;
-	 	self.vel.x *= -0.5f;
-		self.vel.y *= 0.99f;
-		self.vel.z *= 0.99f;
-	}
-	else if (isless(self.pos.x, -0.6f))
-	{
-		self.pos.x = -1.2f - self.pos.x;
-		self.vel.x *= -0.5f;
-		self.vel.y *= 0.99f;
-		self.vel.z *= 0.99f;
-	}
-
-	if (isgreater(self.pos.y, 0.6f))
-	{
-		self.pos.y = 1.2f - self.pos.y;
-		self.vel.x *= 0.99f;
-		self.vel.y *= -0.5f;
-		self.vel.z *= 0.99f;
-	}
-	else if (isless(self.pos.y, -0.6f))
-	{
-		self.pos.y = -1.2f - self.pos.y;
-		self.vel.x *= 0.99f;
-		self.vel.y *= -0.5f;
-		self.vel.z *= 0.99f;
-	}
-	if (isgreater(self.pos.z, 2.4f))
-	{
-		self.pos.z = 4.8f - self.pos.z;
-		self.vel.x *= 0.99f;
-		self.vel.y *= 0.99f;
-		self.vel.z *= -0.5f;
-	}
-	else if (isless(self.pos.z, -0.6f))
-	{
-		self.pos.z = -1.2f - self.pos.z;
-		self.vel.x *= 0.99f;
-		self.vel.y *= 0.99f;
-		self.vel.z *= -0.5f;
-	}
-		
-*/	self.pos = clamp(self.pos, -10.0f, 10.0f);
-	particles[gID].pos = self.pos;
+	/* For now, clamp particle position to a range */
+	particles[gID].pos = clamp(self.pos, -10.0f, 10.0f);
 	particles[gID].vel = self.vel;
 }
 
@@ -511,17 +400,12 @@ __kernel void predictDensityPressure(__global particle_t *particles,
 					   				 __global __read_only const size_t *boundaryNeighbours,
 	 								 __constant fluid_t *params)
 {
-	size_t gID;
-	size_t nNeighbours;
-	size_t nBoundaryNeighbours;
-	float factor;
-	particle_t self;
-
-	gID = get_global_id(0);
-	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
-	nBoundaryNeighbours = boundaryNeighbours[gID * (MAX_NEIGHBOURS + 1)];
-	factor = 0.0f;
-	self = particles[gID];
+	size_t gID = get_global_id(0);
+	size_t nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
+	size_t nBoundaryNeighbours = boundaryNeighbours[gID * (MAX_NEIGHBOURS + 1)];
+	float factor = 0.0f;
+	float temp = 0.0f;
+	particle_t self = particles[gID];
 	
 	size_t j;
 	float weight;
@@ -553,9 +437,6 @@ __kernel void predictDensityPressure(__global particle_t *particles,
 	}
 
 	factor *= params[self.fluidIndex].monaghanSplinePrimeNormalisation;	
-
-	float temp;
-	temp = 0.0f;
 
 	/* Update pressure */
 	if(self.advection != 0.0f)
@@ -593,22 +474,12 @@ __kernel void pressureForces(__global __read_only const particle_t *particles,
 							 __global __write_only float4 *pressure,
 							 __constant fluid_t *params)
 {
-	size_t gID;
-	size_t nNeighbours;
-	size_t nBoundaryNeighbours;
-	float pRhoSqr;
-	float3 pressureForce;
-	particle_t self;
-	
-	gID = get_global_id(0);
-
-	nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
-	nBoundaryNeighbours = boundaryNeighbours[gID * (MAX_NEIGHBOURS + 1)];
-	self = particles[gID];
-
-	pRhoSqr = self.pressure / pown(self.density, 2);
-	pressureForce = 0.0f;
-
+	size_t gID = get_global_id(0);
+	size_t nNeighbours = neighbours[gID * (MAX_NEIGHBOURS + 1)];
+	size_t nBoundaryNeighbours = boundaryNeighbours[gID * (MAX_NEIGHBOURS + 1)];
+	float3 pressureForce = 0.0f;
+	particle_t self = particles[gID];
+	float pRhoSqr = self.pressure / pown(self.density, 2);
 	
 	size_t j;
 	particle_t other;
@@ -641,10 +512,7 @@ __kernel void pressureForces(__global __read_only const particle_t *particles,
 
 float weightMonaghanSpline(float3 p12, float h)
 {
-	float q;
-	h *= 0.5f;
-
-	q = fast_length(p12) / h;
+	float q = fast_length(p12) / (0.5f * h);
 
 	return islessequal(q, 1.0f) * mad(q * q, mad(q, 0.75f, -1.5f), 1.0f) + 			/* q < 1 */
 		   isgreater(q, 1.0f) * islessequal(q, 2.0f) * 0.25f * pow(2.0f - q, 3.0f);	/* 1 < q < 2 */
@@ -652,10 +520,8 @@ float weightMonaghanSpline(float3 p12, float h)
 
 float weightMonaghanSplinePrime(float3 p12, float h)
 {
-	float r;
+	float r = fast_length(p12);
 	h *= 0.5f;
-
-	r = fast_length(p12);
 
 	return 0.75f * pown(h, -2) * (islessequal(r, h) * r * mad(r, 3.0f, -4.0f * h)								/* r < 0.5h */
 								  - isgreater(r, h) * islessequal(r, 2.0f * h) * pown(mad(-2.0f, h, r), 2));	/* 0.5h < r < h */
@@ -663,8 +529,7 @@ float weightMonaghanSplinePrime(float3 p12, float h)
 
 float weightSurfaceTension(float3 p12, float h, float extraTerm)
 {
-	float r;
-	r = fast_length(p12);
+	float r = fast_length(p12);
 
 	return isgreater(r, 0.001f * h) * islessequal(r, h) * pown((h - r) * r, 3) 			/* r < h */
 		   * (1.0f + islessequal(2.0f * r, h)) + islessequal(2.0f * r, h) * extraTerm;	/* r < h/2 */
@@ -672,8 +537,7 @@ float weightSurfaceTension(float3 p12, float h, float extraTerm)
 
 float weightAdhesion(float3 p12, float h)
 {
-	float r;
-	r = fast_length(p12);
+	float r = fast_length(p12);
 
 	return sqrt(sqrt(isgreaterequal(2.0f * r, h) * islessequal(r, h) * (- 4.0f * r * r / h + 6.0f * r - 2.0f * h )));	/* h/2 < r < h */
 }
@@ -690,17 +554,14 @@ float viscosityMonaghan(float3 p12,
 	float vd = dot(v12, p12);
 	
 	// Arbitrary terms - see Monaghan 1992
-	float alpha, beta, etaSqr;
-	alpha  = 1;
-	beta   = 2;
-	etaSqr = 0.01 * interactionRadius * interactionRadius;
+	float alpha = 1;
+	float beta = 2;
+	float etaSqr = 0.01 * interactionRadius * interactionRadius;
 
 	// Take c to be 1400 m/s for now
-	float c;
-	c = 1400;
+	float c = 1400;
 
-	float mu12;
-	mu12 = (interactionRadius * vd) / (dot(p12, p12) + etaSqr);
+	float mu12  = (interactionRadius * vd) / (dot(p12, p12) + etaSqr);
 
 	return isless(vd, 0.0f) * mu12 * mad(-alpha, c, beta * mu12) / rhoAvg;	
 }

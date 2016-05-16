@@ -125,8 +125,8 @@ void hashParticles(particle_t *particles, hash_t *hashes, size_t numParticles, s
 		if (hashes[curHash].num_indices >= MAX_HASH)
 		{
 			hashes[curHash].num_indices = MAX_HASH;
-//			fprintf(stderr, "%u: ", curHash);
-//			fprintf(stderr, "Max hash capacity reached!\n");
+			fprintf(stderr, "%u: ", curHash);
+			fprintf(stderr, "Max hash capacity reached! Number of particles: %u\n", hashes[curHash].num_indices);
 		}
 	}
 }
@@ -224,10 +224,10 @@ int main() {
 	/* gridSize should be the maximum particle interaction radius */
 	fluid_t simulationParams = 
 	{
-		.gravity = {{0.0f, 0.0f, -9.81f}},
-		.timeStep = 0.002f,
-		.relaxationFactor = 0.5f,
-		.gridSize = 0.1125f,
+		.gravity             = {{0.0f, 0.0f, -9.81f}},
+		.timeStep            = 0.002f,
+		.relaxationFactor    = 0.5f,
+		.gridSize            = 0.1125f,
 		.mass                = 0.125f,
 		.radius              = 0.05f,
 		.restDensity         = 1000.0f,
@@ -274,9 +274,8 @@ int main() {
 	boundaryHash = (hash_t*) malloc(sizeof(hash_t) * boundaryHashSize);
 
 	/* Initialise hashes */
-	hashParticles(particles, particleHash, num_fluid_particles, particleHashSize, simulationParams.interactionRadius);
-	hashParticles((particles + num_fluid_particles), boundaryHash, num_boundary_particles, boundaryHashSize, simulationParams.interactionRadius);
-			
+	hashParticles(particles, particleHash, num_fluid_particles, particleHashSize, simulationParams.gridSize);
+	hashParticles((particles + num_fluid_particles), boundaryHash, num_boundary_particles, boundaryHashSize, simulationParams.gridSize);
 	
 	/* Create a device and context */
 	device = create_device();
@@ -336,14 +335,14 @@ int main() {
 		exit(1);   
 	};
 	
-	hashBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 
+	hashBuffer = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 
 				    	sizeof(hash_t) * particleHashSize, particleHash, &err);
 	if(err < 0) {
 		perror("Couldn't create hash buffer");
 		exit(1);   
 	};
 
-	boundaryHashBuffer = clCreateBuffer (context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+	boundaryHashBuffer = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
 				    	sizeof(hash_t) * boundaryHashSize, boundaryHash, &err);
 	if(err < 0) {
 		perror("Couldn't create boundary hash buffer");
@@ -595,8 +594,6 @@ int main() {
 	clFinish(queue);
 	printf("Finding boundary volumes: %f seconds\n", (float)(clock() - t) / CLOCKS_PER_SEC);
 	t = clock();
-
-	/* Calculate boundary particle hashes */
 
 	double iters = 0;
 	/* Execute kernels, read data and print */
@@ -915,7 +912,7 @@ int main() {
 		t = clock();
 
 		/* Re-hash particles */
-		hashParticles(particles, particleHash, num_fluid_particles, particleHashSize, simulationParams.interactionRadius);
+		hashParticles(particles, particleHash, num_fluid_particles, particleHashSize, simulationParams.gridSize);
 		
 		err = clEnqueueWriteBuffer(
 				queue,
