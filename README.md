@@ -7,3 +7,7 @@ Other papers used:
 [J. J. Monaghan 1992](https://dx.doi.org/10.1146/annurev.astro.30.1.543)
 
 [Akinci, Akinci & Teschner 2013](https://dx.doi.org/10.1145/2508363.2508395)
+
+# Tests
+
+https://www.youtube.com/watch?v=kEgZ4gupZBU
