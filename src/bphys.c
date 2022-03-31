@@ -1,41 +1,34 @@
-#ifndef BPHYS_H
-#define BPHYS_H
+#include "bphys.h"
+#include "log.h"
+#include "particle.h"
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
-#ifdef __APPLE__
-#include <OpenCL/cl.h>
-#else
-#include <CL/cl.h>
-#endif
-
-#include "particle.h"
-
 #define MAX_FILENAME 256
 
-void bphysWriteFrame(const particle_t *particles, const unsigned int numParticles, const unsigned int frame, const char* subDir, const char* cacheName)
+void bphys_write_frame(const struct particle *particles, const unsigned int num_particles, const unsigned int frame, const char* sub_dir, const char* cache_name)
 {
 	FILE *file;
 	char filename[MAX_FILENAME];
 
 	/* Avoid creating files in root directory if no subdirectory is provided */
-	if (strcmp(subDir, "") != 0 && subDir != NULL)
+	if (strcmp(sub_dir, "") != 0 && sub_dir != NULL)
 	{
-		snprintf(filename, MAX_FILENAME, "%s/%s_%06u_00.bphys", subDir, cacheName, frame);
+		snprintf(filename, MAX_FILENAME, "%s/%s_%06u_00.bphys", sub_dir, cache_name, frame);
 	}
 	else
 	{
-		snprintf(filename, MAX_FILENAME, "%s_%06u_00.bphys", cacheName, frame);
+		snprintf(filename, MAX_FILENAME, "%s_%06u_00.bphys", cache_name, frame);
 	}
 
 	file = fopen(filename,"w");
 	
 	if (file == NULL)
 	{
-		perror("Couldn't open output file");
-		fprintf(stderr, "Hint: make sure subdirectory %s exists\n", subDir);
+		log_error("Couldn't open output file");
+		log_error("Hint: make sure subdirectory %s exists\n", sub_dir);
 		exit(-1);
 	}
 
@@ -43,18 +36,18 @@ void bphysWriteFrame(const particle_t *particles, const unsigned int numParticle
 	 * data_type = 1 - particle data
 	 * data_size = 7 - number of data points per particle (index, pos(x,y,z), vel(x,y,z))
 	 */
-	static const char bphys[8] = "BPHYSICS";
+	static const char bphys[9] = "BPHYSICS";
 	static const unsigned int data_type = 1;
 	static const unsigned int data_size = 7;
 
 	/* Write header */
 	fwrite(bphys, sizeof(bphys[0]), 8, file);
 	fwrite(&data_type, sizeof(data_type), 1, file);
-	fwrite(&numParticles, sizeof(numParticles), 1, file);
+	fwrite(&num_particles, sizeof(num_particles), 1, file);
 	fwrite(&data_size, sizeof(data_size), 1, file);
 
-	particle_t p;
-	for (unsigned int i = 0; i < numParticles; i++)
+	struct particle p;
+	for (unsigned int i = 0; i < num_particles; i++)
 	{
 		p = particles[i];
 
@@ -71,26 +64,15 @@ void bphysWriteFrame(const particle_t *particles, const unsigned int numParticle
 	fclose(file);
 }
 
-unsigned int bphysReadFrame(particle_t *particles, const unsigned int num_particles, const unsigned int frame, const char* subDir, const char* cacheName)
+unsigned int bphys_read_frame(struct particle *particles, const unsigned int num_particles, const char *filename)
 {
 	FILE *file;
-	char filename[MAX_FILENAME];
-
-	/* Avoid reading files in root directory if no subdirectory is provided */
-	if (strcmp(subDir, "") != 0 && subDir != NULL)
-	{
-		snprintf(filename, MAX_FILENAME, "%s/%s_%06u_00.bphys", subDir, cacheName, frame);
-	}
-	else
-	{
-		snprintf(filename, MAX_FILENAME, "%s_%06u_00.bphys", cacheName, frame);
-	}
 
 	file = fopen(filename, "r");
 	
 	if (file == NULL)
 	{
-		perror("Couldn't open input file");
+		log_error("Couldn't open input file");
 		exit(-1);
 	}
 
@@ -110,7 +92,7 @@ unsigned int bphysReadFrame(particle_t *particles, const unsigned int num_partic
 	{
 		if (ferror(file))
 		{
-			printf("Error reading %s\n", filename);
+			log_error("Error reading %s\n", filename);
 		}
 		fclose(file);
 		return 0;
@@ -123,7 +105,7 @@ unsigned int bphysReadFrame(particle_t *particles, const unsigned int num_partic
 	{
 		if (ferror(file))
 		{
-			printf("Error reading %s\n", filename);
+			log_error("Error reading %s\n", filename);
 		}
 		fclose(file);
 		return 0;
@@ -136,7 +118,7 @@ unsigned int bphysReadFrame(particle_t *particles, const unsigned int num_partic
 	}
 
 	/* Read particle data */
-	particle_t p;
+	struct particle p;
 	if (num_particles > 0)
 	{
 		for (unsigned int i = 0; i < num_particles; i++)
@@ -157,7 +139,7 @@ unsigned int bphysReadFrame(particle_t *particles, const unsigned int num_partic
 			{
 				if (ferror(file))
 				{
-					printf("Error reading %s\n", filename);
+					log_error("Error reading %s\n", filename);
 				}
 				fclose(file);
 				return i;
@@ -171,4 +153,54 @@ unsigned int bphysReadFrame(particle_t *particles, const unsigned int num_partic
 	return num_particles;
 }
 
-#endif /* BPHYS_H */
+void ply_write_frame(const struct particle *particles, const unsigned int num_particles, const unsigned int frame, const char* sub_dir, const char* cache_name)
+{
+	FILE *file;
+	char filename[MAX_FILENAME];
+
+	/* Avoid creating files in root directory if no subdirectory is provided */
+	if (strcmp(sub_dir, "") != 0 && sub_dir != NULL)
+	{
+		snprintf(filename, MAX_FILENAME, "%s/%s_%06u_00.ply", sub_dir, cache_name, frame);
+	}
+	else
+	{
+		snprintf(filename, MAX_FILENAME, "%s_%06u_00.ply", cache_name, frame);
+	}
+
+	file = fopen(filename,"w");
+	
+	if (file == NULL)
+	{
+		log_error("Couldn't open output file");
+		log_error("Hint: make sure subdirectory %s exists\n", sub_dir);
+		exit(-1);
+	}
+
+	/* File header data
+	 * data_type = 1 - particle data
+	 * data_size = 7 - number of data points per particle (index, pos(x,y,z), vel(x,y,z))
+	 */
+	static const char header[] =
+		"ply\n"
+		"format ascii 1.0\n"
+		"element vertex %u\n"
+		"property float x\n"
+		"property float y\n"
+		"property float z\n"
+		"end_header\n";
+
+	/* Write header */
+	fprintf(file, header, num_particles);
+
+	struct particle p;
+	for (unsigned int i = 0; i < num_particles; i++)
+	{
+		p = particles[i];
+
+		/* Write particle data */
+		fprintf(file, "%f %f %f\n", p.pos.x, p.pos.y, p.pos.z);
+	}
+
+	fclose(file);
+}
